@@ -131,24 +131,31 @@ def on_message(client, userdata, msg):
         log("[on_message] error:", e)
 
 def flusher():
-    conn = psycopg2.connect(PG_DSN)
-    conn.autocommit = False
     try:
-        while not stop_event.is_set():
-            batch = []
-            deadline = time.time() + FLUSH_MS/1000.0
-            while len(batch) < BATCH_SIZE and time.time() < deadline:
-                try:
-                    batch.append(q.get(timeout=0.05))
-                except Empty:
-                    pass
-            if batch:
-                with conn.cursor() as cur:
-                    execute_batch(cur, UPSERT_SQL, batch, page_size=1000)
-                conn.commit()
-                log(f"[DB] upsert {len(batch)} rows")
-    finally:
-        conn.close()
+        conn = psycopg2.connect(PG_DSN)
+        conn.autocommit = False
+        try:
+            while not stop_event.is_set():
+                batch = []
+                deadline = time.time() + FLUSH_MS/1000.0
+                while len(batch) < BATCH_SIZE and time.time() < deadline:
+                    try:
+                        batch.append(q.get(timeout=0.05))
+                    except Empty:
+                        pass
+                if batch:
+                    try:
+                        with conn.cursor() as cur:
+                            execute_batch(cur, UPSERT_SQL, batch, page_size=1000)
+                        conn.commit()
+                        log(f"[DB] upsert {len(batch)} rows")
+                    except Exception as e:
+                        log("[flusher] DB error:", e)
+                        conn.rollback()
+        finally:
+            conn.close()
+    except Exception as e:
+        log("[flusher] fatal error:", e)
 
 def main():
     t = Thread(target=flusher, daemon=True); t.start()
