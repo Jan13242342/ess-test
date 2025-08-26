@@ -28,9 +28,10 @@ PG_DSN = (
 
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "200"))
 FLUSH_MS = int(os.getenv("BATCH_FLUSH_MS", "1000"))
+QUEUE_MAXSIZE = int(os.getenv("QUEUE_MAXSIZE", "10000"))
 
 stop_event = Event()
-q: Queue[dict] = Queue(maxsize=10000)
+q: Queue[dict] = Queue(maxsize=QUEUE_MAXSIZE)
 
 FIELDS = [
   "customer_id","dealer_id","device_id",
@@ -131,35 +132,40 @@ def on_message(client, userdata, msg):
         log("[on_message] error:", e)
 
 def flusher():
-    try:
-        conn = psycopg2.connect(PG_DSN)
-        conn.autocommit = False
+    while not stop_event.is_set():
         try:
-            while not stop_event.is_set():
-                batch = []
-                deadline = time.time() + FLUSH_MS/1000.0
-                while len(batch) < BATCH_SIZE and time.time() < deadline:
-                    try:
-                        batch.append(q.get(timeout=0.05))
-                    except Empty:
-                        pass
-                if batch:
-                    try:
-                        with conn.cursor() as cur:
-                            execute_batch(cur, UPSERT_SQL, batch, page_size=1000)
-                        conn.commit()
-                        log(f"[DB] upsert {len(batch)} rows")
-                    except Exception as e:
-                        log("[flusher] DB error:", e)
-                        conn.rollback()
-        finally:
-            conn.close()
-    except Exception as e:
-        log("[flusher] fatal error:", e)
+            conn = psycopg2.connect(PG_DSN)
+            conn.autocommit = False
+            try:
+                while not stop_event.is_set():
+                    batch = []
+                    deadline = time.time() + FLUSH_MS/1000.0
+                    while len(batch) < BATCH_SIZE and time.time() < deadline:
+                        try:
+                            batch.append(q.get(timeout=0.05))
+                        except Empty:
+                            pass
+                    if batch:
+                        try:
+                            with conn.cursor() as cur:
+                                execute_batch(cur, UPSERT_SQL, batch, page_size=1000)
+                            conn.commit()
+                            log(f"[DB] upsert {len(batch)} rows")
+                        except Exception as e:
+                            log("[flusher] DB error:", e)
+                            conn.rollback()
+            finally:
+                conn.close()
+        except Exception as e:
+            log("[flusher] fatal error, will retry in 5s:", e)
+            time.sleep(5)
 
 def main():
     t = Thread(target=flusher, daemon=True); t.start()
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    try:
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    except AttributeError:
+        client = mqtt.Client()
     if MQTT_USERNAME: client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
     client.on_connect = on_connect; client.on_message = on_message
     client.connect(MQTT_HOST, MQTT_PORT, keepalive=60); client.loop_start()
@@ -169,7 +175,11 @@ def main():
     signal.signal(signal.SIGINT, shutdown); signal.signal(signal.SIGTERM, shutdown)
 
     try:
-        while not stop_event.is_set(): time.sleep(0.5)
+        while not stop_event.is_set():
+            if not t.is_alive():
+                log("[main] flusher thread died, shutting down...")
+                stop_event.set()
+            time.sleep(0.5)
     finally:
         stop_event.set()
 
