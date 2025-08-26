@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   postgres:
     image: postgres:15
@@ -43,6 +41,18 @@ services:
     environment:
       - EMQX_NAME=emqx
       - EMQX_ALLOW_ANONYMOUS=true      # 开发期允许匿名；生产务必关闭并做鉴权
+
+  ingestor:
+    build: ./ingestor
+    container_name: ingestor
+    depends_on:
+      - postgres
+      - emqx
+    env_file: .env
+    volumes:
+      - ./ingestor:/app
+    working_dir: /app
+    command: python main.py
 
 volumes:
   pg_data:
