@@ -7,7 +7,7 @@ from queue import Queue, Empty
 from threading import Event, Thread
 
 def log(*args, **kwargs):
-    print(time.strftime("[%Y-%m-%d %H:%M:%S]"), *args, **kwargs)
+    print(time.strftime("[%Y-%m-%d %H:%M:%S]"), *args, flush=True, **kwargs)
 
 load_dotenv(find_dotenv(".env"), override=True)
 
