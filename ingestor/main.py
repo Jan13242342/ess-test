@@ -6,6 +6,9 @@ from dotenv import load_dotenv, find_dotenv
 from queue import Queue, Empty
 from threading import Event, Thread
 
+def log(*args, **kwargs):
+    print(time.strftime("[%Y-%m-%d %H:%M:%S]"), *args, **kwargs)
+
 load_dotenv(find_dotenv(".env"), override=True)
 
 MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
@@ -112,10 +115,10 @@ ON CONFLICT (device_id) DO UPDATE SET
 
 def on_connect(client, userdata, flags, rc, props=None):
     if rc == 0:
-        print(f"[MQTT] connected. subscribing {MQTT_TOPIC} qos={MQTT_QOS}")
+        log(f"[MQTT] connected. subscribing {MQTT_TOPIC} qos={MQTT_QOS}")
         client.subscribe(MQTT_TOPIC, qos=MQTT_QOS)
     else:
-        print(f"[MQTT] connect failed rc={rc}")
+        log(f"[MQTT] connect failed rc={rc}")
 
 def on_message(client, userdata, msg):
     try:
@@ -125,7 +128,7 @@ def on_message(client, userdata, msg):
         rec = normalize(sn, payload)
         q.put(rec, block=False)
     except Exception as e:
-        print("[on_message] error:", e)
+        log("[on_message] error:", e)
 
 def flusher():
     conn = psycopg2.connect(PG_DSN)
@@ -143,7 +146,7 @@ def flusher():
                 with conn.cursor() as cur:
                     execute_batch(cur, UPSERT_SQL, batch, page_size=1000)
                 conn.commit()
-                print(f"[DB] upsert {len(batch)} rows")
+                log(f"[DB] upsert {len(batch)} rows")
     finally:
         conn.close()
 
@@ -155,7 +158,7 @@ def main():
     client.connect(MQTT_HOST, MQTT_PORT, keepalive=60); client.loop_start()
 
     def shutdown(sig, frm):
-        print("shutting down..."); stop_event.set(); client.loop_stop(); client.disconnect()
+        log("shutting down..."); stop_event.set(); client.loop_stop(); client.disconnect()
     signal.signal(signal.SIGINT, shutdown); signal.signal(signal.SIGTERM, shutdown)
 
     try:
