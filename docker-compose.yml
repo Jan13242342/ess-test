@@ -35,24 +35,32 @@ services:
     container_name: emqx
     restart: always
     ports:
-      - "${EMQX_MQTT_TCP_PORT}:1883"   # MQTT TCP
-      - "${EMQX_WS_PORT}:8083"         # WebSocket /mqtt
-      - "${EMQX_DASHBOARD_PORT}:18083" # Dashboard
+      - "${EMQX_MQTT_TCP_PORT}:1883"
+      - "${EMQX_WS_PORT}:8083"
+      - "${EMQX_DASHBOARD_PORT}:18083"
     environment:
       - EMQX_NAME=emqx
-      - EMQX_ALLOW_ANONYMOUS=true      # 开发期允许匿名；生产务必关闭并做鉴权
+      - EMQX_ALLOW_ANONYMOUS=true
+    healthcheck:
+      test: ["CMD", "emqx_ctl", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   ingestor:
     build: ./ingestor
     container_name: ingestor
     depends_on:
-      - postgres
-      - emqx
+      postgres:
+        condition: service_healthy
+      emqx:
+        condition: service_healthy
     env_file: .env
     volumes:
       - ./ingestor:/app
     working_dir: /app
     command: python main.py
+    restart: on-failure
 
 volumes:
   pg_data:
