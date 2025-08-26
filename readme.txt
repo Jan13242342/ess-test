@@ -1,4 +1,4 @@
-建表（只需一次）
+建表（只需一次） 22222222222
 
 cd your-project\scripts
 py -m pip install --user psycopg2-binary python-dotenv
