@@ -1,38 +1,16 @@
-CREATE TABLE IF NOT EXISTS ess_realtime_data (
-  dealer_id         BIGINT  REFERENCES dealers(id) ON DELETE SET NULL,
-  device_id         BIGINT  PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
-  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-  soc               SMALLINT NOT NULL CHECK (soc BETWEEN 0 AND 100),
-  soh               SMALLINT NOT NULL DEFAULT 100 CHECK (soh BETWEEN 0 AND 100),
-  pv                INTEGER  NOT NULL DEFAULT 0,
-  load              INTEGER  NOT NULL DEFAULT 0,
-  grid              INTEGER  NOT NULL DEFAULT 0,
-  grid_q            INTEGER  NOT NULL DEFAULT 0,
-  batt              INTEGER  NOT NULL DEFAULT 0,
-  ac_v              INTEGER  NOT NULL DEFAULT 0,
-  ac_f              INTEGER  NOT NULL DEFAULT 0,
-  v_a               INTEGER  NOT NULL DEFAULT 0,
-  v_b               INTEGER  NOT NULL DEFAULT 0,
-  v_c               INTEGER  NOT NULL DEFAULT 0,
-  i_a               INTEGER  NOT NULL DEFAULT 0,
-  i_b               INTEGER  NOT NULL DEFAULT 0,
-  i_c               INTEGER  NOT NULL DEFAULT 0,
-  p_a               INTEGER  NOT NULL DEFAULT 0,
-  p_b               INTEGER  NOT NULL DEFAULT 0,
-  p_c               INTEGER  NOT NULL DEFAULT 0,
-  q_a               INTEGER  NOT NULL DEFAULT 0,
-  q_b               INTEGER  NOT NULL DEFAULT 0,
-  q_c               INTEGER  NOT NULL DEFAULT 0,
-  e_pv_today        BIGINT   NOT NULL DEFAULT 0,
-  e_load_today      BIGINT   NOT NULL DEFAULT 0,
-  e_charge_today    BIGINT   NOT NULL DEFAULT 0,
-  e_discharge_today BIGINT   NOT NULL DEFAULT 0
+-- 1. 先建依赖表
+CREATE TABLE IF NOT EXISTS users (
+  id BIGSERIAL PRIMARY KEY,
+  username TEXT NOT NULL UNIQUE
 );
 
-CREATE INDEX IF NOT EXISTS idx_ess_dealer   ON ess_realtime_data (dealer_id);
-CREATE INDEX IF NOT EXISTS idx_ess_updated  ON ess_realtime_data (updated_at DESC);
+CREATE TABLE IF NOT EXISTS dealers (
+  id BIGSERIAL PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE
+);
 
--- 枚举类型（只需建一次）
+-- 2. 再建其它表和类型
+-- 枚举类型
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'device_status') THEN
@@ -42,16 +20,16 @@ END$$;
 
 -- 设备主表
 CREATE TABLE IF NOT EXISTS devices (
-  id               BIGSERIAL PRIMARY KEY,                -- 内部主键（供外键引用）
-  device_sn        TEXT NOT NULL UNIQUE,                 -- 出厂 SN，业务唯一
-  model            TEXT,
+  id BIGSERIAL PRIMARY KEY,
+  device_sn TEXT NOT NULL UNIQUE,
+  model TEXT,
   firmware_version TEXT,
-  user_id          BIGINT REFERENCES users(id)   ON DELETE SET NULL,
-  dealer_id        BIGINT REFERENCES dealers(id) ON DELETE SET NULL,
-  location         JSONB,                                -- 存地址/经纬度/安装信息等
-  status           device_status,
-  installed_at     TIMESTAMPTZ,
-  created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+  user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  dealer_id BIGINT REFERENCES dealers(id) ON DELETE SET NULL,
+  location JSONB,
+  status device_status,
+  installed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- 常用索引
@@ -64,17 +42,53 @@ CREATE INDEX IF NOT EXISTS ix_devices_unbound_created
   ON devices(created_at DESC)
   WHERE user_id IS NULL;
 
+-- ess_realtime_data
+CREATE TABLE IF NOT EXISTS ess_realtime_data (
+  dealer_id BIGINT REFERENCES dealers(id) ON DELETE SET NULL,
+  device_id BIGINT PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  soc SMALLINT NOT NULL CHECK (soc BETWEEN 0 AND 100),
+  soh SMALLINT NOT NULL DEFAULT 100 CHECK (soh BETWEEN 0 AND 100),
+  pv INTEGER NOT NULL DEFAULT 0,
+  load INTEGER NOT NULL DEFAULT 0,
+  grid INTEGER NOT NULL DEFAULT 0,
+  grid_q INTEGER NOT NULL DEFAULT 0,
+  batt INTEGER NOT NULL DEFAULT 0,
+  ac_v INTEGER NOT NULL DEFAULT 0,
+  ac_f INTEGER NOT NULL DEFAULT 0,
+  v_a INTEGER NOT NULL DEFAULT 0,
+  v_b INTEGER NOT NULL DEFAULT 0,
+  v_c INTEGER NOT NULL DEFAULT 0,
+  i_a INTEGER NOT NULL DEFAULT 0,
+  i_b INTEGER NOT NULL DEFAULT 0,
+  i_c INTEGER NOT NULL DEFAULT 0,
+  p_a INTEGER NOT NULL DEFAULT 0,
+  p_b INTEGER NOT NULL DEFAULT 0,
+  p_c INTEGER NOT NULL DEFAULT 0,
+  q_a INTEGER NOT NULL DEFAULT 0,
+  q_b INTEGER NOT NULL DEFAULT 0,
+  q_c INTEGER NOT NULL DEFAULT 0,
+  e_pv_today BIGINT NOT NULL DEFAULT 0,
+  e_load_today BIGINT NOT NULL DEFAULT 0,
+  e_charge_today BIGINT NOT NULL DEFAULT 0,
+  e_discharge_today BIGINT NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_ess_dealer   ON ess_realtime_data (dealer_id);
+CREATE INDEX IF NOT EXISTS idx_ess_updated  ON ess_realtime_data (updated_at DESC);
+
+-- history_energy
 CREATE TABLE IF NOT EXISTS history_energy (
   id BIGSERIAL PRIMARY KEY,
-  device_id  BIGINT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
-  ts         TIMESTAMPTZ NOT NULL,
-  charge_wh_total    BIGINT,
+  device_id BIGINT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  ts TIMESTAMPTZ NOT NULL,
+  charge_wh_total BIGINT,
   discharge_wh_total BIGINT,
-  pv_wh_total        BIGINT,
+  pv_wh_total BIGINT,
   CONSTRAINT uq_energy_device_ts UNIQUE (device_id, ts),
-  CONSTRAINT chk_nonneg_charge    CHECK (charge_wh_total    IS NULL OR charge_wh_total    >= 0),
+  CONSTRAINT chk_nonneg_charge CHECK (charge_wh_total IS NULL OR charge_wh_total >= 0),
   CONSTRAINT chk_nonneg_discharge CHECK (discharge_wh_total IS NULL OR discharge_wh_total >= 0),
-  CONSTRAINT chk_nonneg_pv        CHECK (pv_wh_total        IS NULL OR pv_wh_total        >= 0)
+  CONSTRAINT chk_nonneg_pv CHECK (pv_wh_total IS NULL OR pv_wh_total >= 0)
 ) PARTITION BY RANGE (ts);
 
 CREATE TABLE IF NOT EXISTS history_energy_2025_08 PARTITION OF history_energy
@@ -85,15 +99,3 @@ CREATE TABLE IF NOT EXISTS history_energy_2025_08 PARTITION OF history_energy
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 
 -- 下面可以直接写定时任务的 SQL
-
-CREATE TABLE IF NOT EXISTS users (
-  id BIGSERIAL PRIMARY KEY,
-  username TEXT NOT NULL UNIQUE
-  -- 其它字段可按需添加
-);
-
-CREATE TABLE IF NOT EXISTS dealers (
-  id BIGSERIAL PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE
-  -- 其它字段可按需添加
-);
