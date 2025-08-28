@@ -91,10 +91,19 @@ CREATE TABLE IF NOT EXISTS history_energy (
   CONSTRAINT chk_nonneg_pv CHECK (pv_wh_total IS NULL OR pv_wh_total >= 0)
 ) PARTITION BY RANGE (ts);
 
-CREATE TABLE IF NOT EXISTS history_energy_2025_08 PARTITION OF history_energy
-  FOR VALUES FROM ('2025-08-01 00:00:00') TO ('2025-09-01 00:00:00');
-
--- 以后每月建一个分区即可
+-- 自动创建本月分区（首次部署时保证本月可用）
+DO $$
+DECLARE
+  this_month date := date_trunc('month', now());
+  next_month date := date_trunc('month', now()) + interval '1 month';
+  partition_name text := 'history_energy_' || to_char(this_month, 'YYYY_MM');
+BEGIN
+  EXECUTE format(
+    'CREATE TABLE IF NOT EXISTS %I PARTITION OF history_energy FOR VALUES FROM (%L) TO (%L);',
+    partition_name, this_month, next_month
+  );
+END;
+$$;
 
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 
