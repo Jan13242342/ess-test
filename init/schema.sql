@@ -1,4 +1,4 @@
--- 1. 先建依赖表
+-- 1. 先建依赖表 (Create dependency tables first)
 CREATE TABLE IF NOT EXISTS users (
   id BIGSERIAL PRIMARY KEY,
   username TEXT NOT NULL UNIQUE
@@ -9,8 +9,8 @@ CREATE TABLE IF NOT EXISTS dealers (
   name TEXT NOT NULL UNIQUE
 );
 
--- 2. 再建其它表和类型
--- 枚举类型
+-- 2. 再建其它表和类型 (Then create other tables and types)
+-- 枚举类型 (Enum type)
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'device_status') THEN
@@ -18,7 +18,7 @@ BEGIN
   END IF;
 END$$;
 
--- 设备主表
+-- 设备主表 (Device main table)
 CREATE TABLE IF NOT EXISTS devices (
   id BIGSERIAL PRIMARY KEY,
   device_sn TEXT NOT NULL UNIQUE,
@@ -32,17 +32,17 @@ CREATE TABLE IF NOT EXISTS devices (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- 常用索引
+-- 常用索引 (Common indexes)
 CREATE INDEX IF NOT EXISTS ix_devices_user_id    ON devices(user_id);
 CREATE INDEX IF NOT EXISTS ix_devices_dealer_id  ON devices(dealer_id);
 CREATE INDEX IF NOT EXISTS ix_devices_location   ON devices USING GIN(location);
 
--- 可选：待绑定设备的加速索引
+-- 可选：待绑定设备的加速索引 (Optional: index for unbound devices)
 CREATE INDEX IF NOT EXISTS ix_devices_unbound_created
   ON devices(created_at DESC)
   WHERE user_id IS NULL;
 
--- ess_realtime_data
+-- ess_realtime_data 实时数据表 (Real-time data table)
 CREATE TABLE IF NOT EXISTS ess_realtime_data (
   dealer_id BIGINT REFERENCES dealers(id) ON DELETE SET NULL,
   device_id BIGINT PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS ess_realtime_data (
 CREATE INDEX IF NOT EXISTS idx_ess_dealer   ON ess_realtime_data (dealer_id);
 CREATE INDEX IF NOT EXISTS idx_ess_updated  ON ess_realtime_data (updated_at DESC);
 
--- history_energy
+-- history_energy 历史能耗主表 (History energy main table, partitioned)
 CREATE TABLE IF NOT EXISTS history_energy (
   id BIGSERIAL,
   device_id BIGINT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS history_energy (
 ) PARTITION BY RANGE (ts);
 
 -- 自动创建本月分区（首次部署时保证本月可用）
+-- (Auto-create current month's partition to ensure availability on first deployment)
 DO $$
 DECLARE
   this_month date := date_trunc('month', now());
@@ -105,8 +106,10 @@ BEGIN
 END;
 $$;
 
+-- 安装 pg_cron 扩展 (Install pg_cron extension)
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 
+-- 自动创建下个月分区的函数 (Function to auto-create next month's partition)
 CREATE OR REPLACE FUNCTION create_next_history_energy_partition()
 RETURNS void AS $$
 DECLARE
@@ -121,6 +124,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- 每月1号自动创建下个月分区 (Schedule: auto-create next month's partition on the 1st of each month)
 SELECT cron.schedule(
   'create_next_history_energy_partition',
   '0 0 1 * *',
