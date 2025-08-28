@@ -19,9 +19,7 @@ def build_topic(device_id: str) -> str:
 
 def rnd(a, b): return random.randint(a, b)
 
-def gen_payload(customer_id: str | None, dealer_id: str | None) -> dict:
-    # 随机生成 customer_id
-    customer_id = f"C{random.randint(100, 999)}"
+def gen_payload(dealer_id: str | None) -> dict:
     soc  = rnd(0, 100)
     soh  = rnd(95, 100)
     pv   = rnd(0, 3500)
@@ -31,7 +29,6 @@ def gen_payload(customer_id: str | None, dealer_id: str | None) -> dict:
     batt = pv - load - grid
     base_v = rnd(228000, 233000)  # mV
     return {
-        "customer_id": customer_id,
         "dealer_id":   dealer_id or "D001",
         "soc": soc, "soh": soh,
         "pv": pv, "load": load, "grid": grid, "grid_q": grid_q, "batt": batt,
@@ -67,7 +64,7 @@ def device_worker(device_id, args):
     try:
         while not stop:
             i += 1
-            payload = gen_payload(args.customer_id, args.dealer_id)
+            payload = gen_payload(args.dealer_id)
             data = json.dumps(payload, ensure_ascii=False)
             print(f"[{device_id}] [SEND {i}] {topic} -> {data}")
             r = client.publish(topic, data.encode("utf-8"), qos=qos, retain=args.retain)

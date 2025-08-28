@@ -34,15 +34,16 @@ stop_event = Event()
 q: Queue[dict] = Queue(maxsize=QUEUE_MAXSIZE)
 
 FIELDS = [
-  "customer_id","dealer_id","device_id",
-  "soc","soh",
-  "pv","load","grid","grid_q","batt",
-  "ac_v","ac_f",
-  "v_a","v_b","v_c",
-  "i_a","i_b","i_c",
-  "p_a","p_b","p_c",
-  "q_a","q_b","q_c",
-  "e_pv_today","e_load_today","e_charge_today","e_discharge_today",
+    "dealer_id",
+    "device_id",
+    "soc", "soh",
+    "pv", "load", "grid", "grid_q", "batt",
+    "ac_v", "ac_f",
+    "v_a", "v_b", "v_c",
+    "i_a", "i_b", "i_c",
+    "p_a", "p_b", "p_c",
+    "q_a", "q_b", "q_c",
+    "e_pv_today", "e_load_today", "e_charge_today", "e_discharge_today"
 ]
 
 def parse_device_id(topic: str):
@@ -61,7 +62,6 @@ def to_int(v, default=0):
 def normalize(sn: str, payload: dict) -> dict:
     d = {k: 0 for k in FIELDS}
     d["device_id"] = sn
-    d["customer_id"] = payload.get("customer_id") or ""
     d["dealer_id"]   = payload.get("dealer_id") or ""
     d["soc"] = to_int(payload.get("soc"), 0)
     d["soh"] = to_int(payload.get("soh"), 100)
@@ -79,7 +79,7 @@ def normalize(sn: str, payload: dict) -> dict:
 
 UPSERT_SQL = """
 INSERT INTO ess_realtime_data (
-  customer_id, dealer_id, device_id, updated_at,
+  dealer_id, device_id, updated_at,
   soc, soh,
   pv, load, grid, grid_q, batt,
   ac_v, ac_f,
@@ -89,7 +89,7 @@ INSERT INTO ess_realtime_data (
   q_a, q_b, q_c,
   e_pv_today, e_load_today, e_charge_today, e_discharge_today
 ) VALUES (
-  %(customer_id)s, %(dealer_id)s, %(device_id)s, now(),
+  %(dealer_id)s, %(device_id)s, now(),
   %(soc)s, %(soh)s,
   %(pv)s, %(load)s, %(grid)s, %(grid_q)s, %(batt)s,
   %(ac_v)s, %(ac_f)s,
@@ -100,7 +100,6 @@ INSERT INTO ess_realtime_data (
   %(e_pv_today)s, %(e_load_today)s, %(e_charge_today)s, %(e_discharge_today)s
 )
 ON CONFLICT (device_id) DO UPDATE SET
-  customer_id=EXCLUDED.customer_id,
   dealer_id=EXCLUDED.dealer_id,
   updated_at=now(),
   soc=EXCLUDED.soc, soh=EXCLUDED.soh,
