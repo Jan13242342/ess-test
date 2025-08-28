@@ -62,4 +62,8 @@ services:
     command: python main.py
     restart: on-failure
 
+volumes:
+  pg_data:
+  pgadmin_data:
+
 
