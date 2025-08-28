@@ -79,13 +79,13 @@ CREATE INDEX IF NOT EXISTS idx_ess_updated  ON ess_realtime_data (updated_at DES
 
 -- history_energy
 CREATE TABLE IF NOT EXISTS history_energy (
-  id BIGSERIAL PRIMARY KEY,
+  id BIGSERIAL,
   device_id BIGINT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
   ts TIMESTAMPTZ NOT NULL,
   charge_wh_total BIGINT,
   discharge_wh_total BIGINT,
   pv_wh_total BIGINT,
-  CONSTRAINT uq_energy_device_ts UNIQUE (device_id, ts),
+  CONSTRAINT pk_history_energy PRIMARY KEY (device_id, ts),
   CONSTRAINT chk_nonneg_charge CHECK (charge_wh_total IS NULL OR charge_wh_total >= 0),
   CONSTRAINT chk_nonneg_discharge CHECK (discharge_wh_total IS NULL OR discharge_wh_total >= 0),
   CONSTRAINT chk_nonneg_pv CHECK (pv_wh_total IS NULL OR pv_wh_total >= 0)
