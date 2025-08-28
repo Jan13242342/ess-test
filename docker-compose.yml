@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: citusdata/pg_cron:pg15
+    build: .
     container_name: postgres_db
     restart: always
     env_file: .env
