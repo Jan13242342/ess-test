@@ -130,3 +130,49 @@ SELECT cron.schedule(
   '0 0 1 * *',
   'SELECT create_next_history_energy_partition();'
 );
+
+-- 初始化10个测试用户 (Init 10 test users)
+INSERT INTO users (id, username) VALUES
+  (1, 'testuser1'),
+  (2, 'testuser2'),
+  (3, 'testuser3'),
+  (4, 'testuser4'),
+  (5, 'testuser5'),
+  (6, 'testuser6'),
+  (7, 'testuser7'),
+  (8, 'testuser8'),
+  (9, 'testuser9'),
+  (10, 'testuser10')
+ON CONFLICT DO NOTHING;
+
+-- 初始化10个测试经销商 (Init 10 test dealers)
+INSERT INTO dealers (id, name) VALUES
+  (1, '测试经销商1'),
+  (2, '测试经销商2'),
+  (3, '测试经销商3'),
+  (4, '测试经销商4'),
+  (5, '测试经销商5'),
+  (6, '测试经销商6'),
+  (7, '测试经销商7'),
+  (8, '测试经销商8'),
+  (9, '测试经销商9'),
+  (10, '测试经销商10')
+ON CONFLICT DO NOTHING;
+------------------------------------------
+------------------------------------------
+------------------------------------------
+-- 初始化10个测试设备 (Init 10 test devices)
+INSERT INTO devices (
+  id, device_sn, model, firmware_version, user_id, dealer_id, location, status, installed_at, created_at
+) VALUES
+  (1, 'SN001', 'MODEL_X', 'v1.0', 1, 1, NULL, 'active', now(), now()),
+  (2, 'SN002', 'MODEL_X', 'v1.0', 2, 2, NULL, 'active', now(), now()),
+  (3, 'SN003', 'MODEL_X', 'v1.0', 3, 3, NULL, 'active', now(), now()),
+  (4, 'SN004', 'MODEL_X', 'v1.0', 4, 4, NULL, 'active', now(), now()),
+  (5, 'SN005', 'MODEL_X', 'v1.0', 5, 5, NULL, 'active', now(), now()),
+  (6, 'SN006', 'MODEL_X', 'v1.0', 6, 6, NULL, 'active', now(), now()),
+  (7, 'SN007', 'MODEL_X', 'v1.0', 7, 7, NULL, 'active', now(), now()),
+  (8, 'SN008', 'MODEL_X', 'v1.0', 8, 8, NULL, 'active', now(), now()),
+  (9, 'SN009', 'MODEL_X', 'v1.0', 9, 9, NULL, 'active', now(), now()),
+  (10, 'SN010', 'MODEL_X', 'v1.0', 10, 10, NULL, 'active', now(), now())
+ON CONFLICT DO NOTHING;

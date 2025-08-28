@@ -61,8 +61,8 @@ def to_int(v, default=0):
 
 def normalize(sn: str, payload: dict) -> dict:
     d = {k: 0 for k in FIELDS}
-    d["device_id"] = sn
-    d["dealer_id"]   = payload.get("dealer_id") or ""
+    d["device_id"] = int(sn)
+    d["dealer_id"] = int(payload.get("dealer_id") or 0)
     d["soc"] = to_int(payload.get("soc"), 0)
     d["soh"] = to_int(payload.get("soh"), 100)
     for k in [
