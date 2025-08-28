@@ -13,7 +13,6 @@ services:
       retries: 10
     volumes:
       - pg_data:/bitnami/postgresql
-      - ./init/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
   
 
   pgadmin:
