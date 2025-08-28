@@ -1,7 +1,6 @@
 CREATE TABLE IF NOT EXISTS ess_realtime_data (
-  customer_id       TEXT    NOT NULL,
-  dealer_id         TEXT    NOT NULL,
-  device_id         TEXT    PRIMARY KEY,
+  dealer_id         BIGINT  REFERENCES dealers(id) ON DELETE SET NULL,
+  device_id         BIGINT  PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   soc               SMALLINT NOT NULL CHECK (soc BETWEEN 0 AND 100),
   soh               SMALLINT NOT NULL DEFAULT 100 CHECK (soh BETWEEN 0 AND 100),
@@ -30,6 +29,59 @@ CREATE TABLE IF NOT EXISTS ess_realtime_data (
   e_discharge_today BIGINT   NOT NULL DEFAULT 0
 );
 
-CREATE INDEX IF NOT EXISTS idx_ess_customer ON ess_realtime_data (customer_id);
 CREATE INDEX IF NOT EXISTS idx_ess_dealer   ON ess_realtime_data (dealer_id);
 CREATE INDEX IF NOT EXISTS idx_ess_updated  ON ess_realtime_data (updated_at DESC);
+
+-- 枚举类型（只需建一次）
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'device_status') THEN
+    CREATE TYPE device_status AS ENUM ('active','inactive','installing','fault','retired');
+  END IF;
+END$$;
+
+-- 设备主表
+CREATE TABLE IF NOT EXISTS devices (
+  id               BIGSERIAL PRIMARY KEY,                -- 内部主键（供外键引用）
+  device_sn        TEXT NOT NULL UNIQUE,                 -- 出厂 SN，业务唯一
+  model            TEXT,
+  firmware_version TEXT,
+  user_id          BIGINT REFERENCES users(id)   ON DELETE SET NULL,
+  dealer_id        BIGINT REFERENCES dealers(id) ON DELETE SET NULL,
+  location         JSONB,                                -- 存地址/经纬度/安装信息等
+  status           device_status,
+  installed_at     TIMESTAMPTZ,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 常用索引
+CREATE INDEX IF NOT EXISTS ix_devices_user_id    ON devices(user_id);
+CREATE INDEX IF NOT EXISTS ix_devices_dealer_id  ON devices(dealer_id);
+CREATE INDEX IF NOT EXISTS ix_devices_location   ON devices USING GIN(location);
+
+-- 可选：待绑定设备的加速索引
+CREATE INDEX IF NOT EXISTS ix_devices_unbound_created
+  ON devices(created_at DESC)
+  WHERE user_id IS NULL;
+
+CREATE TABLE IF NOT EXISTS history_energy (
+  id BIGSERIAL PRIMARY KEY,
+  device_id  BIGINT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  ts         TIMESTAMPTZ NOT NULL,
+  charge_wh_total    BIGINT,
+  discharge_wh_total BIGINT,
+  pv_wh_total        BIGINT,
+  CONSTRAINT uq_energy_device_ts UNIQUE (device_id, ts),
+  CONSTRAINT chk_nonneg_charge    CHECK (charge_wh_total    IS NULL OR charge_wh_total    >= 0),
+  CONSTRAINT chk_nonneg_discharge CHECK (discharge_wh_total IS NULL OR discharge_wh_total >= 0),
+  CONSTRAINT chk_nonneg_pv        CHECK (pv_wh_total        IS NULL OR pv_wh_total        >= 0)
+) PARTITION BY RANGE (ts);
+
+CREATE TABLE IF NOT EXISTS history_energy_2025_08 PARTITION OF history_energy
+  FOR VALUES FROM ('2025-08-01 00:00:00') TO ('2025-09-01 00:00:00');
+
+-- 以后每月建一个分区即可
+
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+
+-- 下面可以直接写定时任务的 SQL
