@@ -99,3 +99,20 @@ CREATE TABLE IF NOT EXISTS history_energy_2025_08 PARTITION OF history_energy
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 
 -- 下面可以直接写定时任务的 SQL
+SELECT cron.schedule(
+  'create_next_history_energy_partition',
+  '0 0 1 * *',  -- 每月1号 0点
+  $$
+  DO $$
+  DECLARE
+    next_month date := date_trunc('month', now()) + interval '1 month';
+    next_next_month date := date_trunc('month', now()) + interval '2 month';
+    partition_name text := 'history_energy_' || to_char(next_month, 'YYYY_MM');
+  BEGIN
+    EXECUTE format(
+      'CREATE TABLE IF NOT EXISTS %I PARTITION OF history_energy FOR VALUES FROM (%L) TO (%L);',
+      partition_name, next_month, next_next_month
+    );
+  END $$;
+  $$
+);
