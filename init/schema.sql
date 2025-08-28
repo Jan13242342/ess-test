@@ -85,3 +85,15 @@ CREATE TABLE IF NOT EXISTS history_energy_2025_08 PARTITION OF history_energy
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 
 -- 下面可以直接写定时任务的 SQL
+
+CREATE TABLE IF NOT EXISTS users (
+  id BIGSERIAL PRIMARY KEY,
+  username TEXT NOT NULL UNIQUE
+  -- 其它字段可按需添加
+);
+
+CREATE TABLE IF NOT EXISTS dealers (
+  id BIGSERIAL PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE
+  -- 其它字段可按需添加
+);
