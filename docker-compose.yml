@@ -11,6 +11,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    volumes:
+      - pg_data:/bitnami/postgresql
+      - ./init/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
   
 
   pgadmin:
@@ -59,6 +62,4 @@ services:
     command: python main.py
     restart: on-failure
 
-volumes:
-  pg_data:
-  pgadmin_data:
+
