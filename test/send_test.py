@@ -3,15 +3,15 @@ import threading
 import random
 import paho.mqtt.client as mqtt
 
-# 直接写MQTT服务器IP和端口
-MQTT_HOST = "37.114.34.61"   # <-- 这里改成你的远程MQTT服务器IP
+MQTT_HOST = "37.114.34.61"   # 改成你的MQTT服务器IP
 MQTT_PORT = 1883
-MQTT_TOPIC = "devices/+/realtime"
 MQTT_QOS = 1
 
 def build_topic(device_id) -> str:
-    t = MQTT_TOPIC
-    return t.replace("+", str(device_id), 1) if "+" in t else f"devices/{device_id}/realtime"
+    return f"devices/{device_id}/realtime"
+
+def build_history_topic(device_id) -> str:
+    return f"devices/{device_id}/history"
 
 def rnd(a, b):
     return random.randint(a, b)
@@ -38,20 +38,42 @@ def gen_payload(dealer_id: int, device_id: int) -> dict:
         "e_charge_today": rnd(0, 50000), "e_discharge_today": rnd(0, 50000),
     }
 
-def device_worker(device_id, dealer_id, interval=2):
+def gen_history_payload(device_id: int, ts: str) -> dict:
+    return {
+        "device_id": device_id,
+        "ts": ts,  # ISO格式时间字符串
+        "charge_wh_total": rnd(10000, 50000),
+        "discharge_wh_total": rnd(10000, 50000),
+        "pv_wh_total": rnd(10000, 50000)
+    }
+
+def device_worker(device_id, dealer_id, interval=2, history_interval=10):
     while True:
         try:
             client = mqtt.Client()
             client.connect(MQTT_HOST, MQTT_PORT, 60)
-            client.loop_start()  # 启动网络循环，保持心跳
+            client.loop_start()
             topic = build_topic(device_id)
+            history_topic = build_history_topic(device_id)
+            last_history = time.time()
             while True:
+                # 发送实时数据
                 payload = gen_payload(dealer_id, device_id)
                 result = client.publish(topic, str(payload).replace("'", '"'), qos=MQTT_QOS)
                 if result.rc != 0:
                     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] device_id={device_id} publish失败: {result.rc}")
-                    break  # 跳出内层循环，重新连接
+                    break
                 print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] device_id={device_id} dealer_id={dealer_id} sent to {topic}")
+                # 定时发送历史数据
+                if time.time() - last_history >= history_interval:
+                    ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                    his_payload = gen_history_payload(device_id, ts)
+                    his_result = client.publish(history_topic, str(his_payload).replace("'", '"'), qos=MQTT_QOS)
+                    if his_result.rc != 0:
+                        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] device_id={device_id} history publish失败: {his_result.rc}")
+                        break
+                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] device_id={device_id} sent history to {history_topic}")
+                    last_history = time.time()
                 time.sleep(interval)
         except Exception as e:
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] device_id={device_id} 发生异常: {e}")
@@ -61,7 +83,7 @@ def device_worker(device_id, dealer_id, interval=2):
                 client.disconnect()
             except:
                 pass
-            time.sleep(5)  # 等待5秒后重连
+            time.sleep(5)
 
 if __name__ == "__main__":
     threads = []

@@ -113,20 +113,60 @@ ON CONFLICT (device_id) DO UPDATE SET
   e_charge_today=EXCLUDED.e_charge_today, e_discharge_today=EXCLUDED.e_discharge_today;
 """
 
+# 新增历史能量数据的共享订阅和处理
+HISTORY_TOPIC = os.getenv("MQTT_HISTORY_TOPIC", "$share/ess-ingestor/devices/+/history")
+history_q: Queue[dict] = Queue(maxsize=QUEUE_MAXSIZE)
+
+HISTORY_UPSERT_SQL = """
+INSERT INTO history_energy (
+  device_id, ts, charge_wh_total, discharge_wh_total, pv_wh_total
+) VALUES (
+  %(device_id)s, %(ts)s, %(charge_wh_total)s, %(discharge_wh_total)s, %(pv_wh_total)s
+)
+ON CONFLICT (device_id, ts) DO UPDATE SET
+  charge_wh_total=EXCLUDED.charge_wh_total,
+  discharge_wh_total=EXCLUDED.discharge_wh_total,
+  pv_wh_total=EXCLUDED.pv_wh_total;
+"""
+
+def parse_history_device_id(topic: str):
+    parts = topic.split("/")
+    if len(parts) >= 3 and parts[0]=="devices" and parts[2]=="history":
+        return parts[1]
+    return None
+
+def normalize_history(sn: str, payload: dict) -> dict:
+    return {
+        "device_id": int(sn),
+        "ts": payload.get("ts"),
+        "charge_wh_total": int(payload.get("charge_wh_total", 0)),
+        "discharge_wh_total": int(payload.get("discharge_wh_total", 0)),
+        "pv_wh_total": int(payload.get("pv_wh_total", 0)),
+    }
+
 def on_connect(client, userdata, flags, rc, props=None):
     if rc == 0:
         log(f"[MQTT] connected. subscribing {MQTT_TOPIC} qos={MQTT_QOS}")
         client.subscribe(MQTT_TOPIC, qos=MQTT_QOS)
+        log(f"[MQTT] subscribing {HISTORY_TOPIC} qos={MQTT_QOS}")
+        client.subscribe(HISTORY_TOPIC, qos=MQTT_QOS)
     else:
         log(f"[MQTT] connect failed rc={rc}")
 
 def on_message(client, userdata, msg):
     try:
-        sn = parse_device_id(msg.topic)
-        if not sn: return
-        payload = json.loads(msg.payload.decode("utf-8"))
-        rec = normalize(sn, payload)
-        q.put(rec, block=False)
+        if msg.topic.endswith("/realtime"):
+            sn = parse_device_id(msg.topic)
+            if not sn: return
+            payload = json.loads(msg.payload.decode("utf-8"))
+            rec = normalize(sn, payload)
+            q.put(rec, block=False)
+        elif msg.topic.endswith("/history"):
+            sn = parse_history_device_id(msg.topic)
+            if not sn: return
+            payload = json.loads(msg.payload.decode("utf-8"))
+            rec = normalize_history(sn, payload)
+            history_q.put(rec, block=False)
     except Exception as e:
         log("[on_message] error:", e)
 
@@ -159,8 +199,38 @@ def flusher():
             log("[flusher] fatal error, will retry in 5s:", e)
             time.sleep(5)
 
+def history_flusher():
+    while not stop_event.is_set():
+        try:
+            conn = psycopg2.connect(PG_DSN)
+            conn.autocommit = False
+            try:
+                while not stop_event.is_set():
+                    batch = []
+                    deadline = time.time() + FLUSH_MS/1000.0
+                    while len(batch) < BATCH_SIZE and time.time() < deadline:
+                        try:
+                            batch.append(history_q.get(timeout=0.05))
+                        except Empty:
+                            pass
+                    if batch:
+                        try:
+                            with conn.cursor() as cur:
+                                execute_batch(cur, HISTORY_UPSERT_SQL, batch, page_size=1000)
+                            conn.commit()
+                            log(f"[DB] upsert history {len(batch)} rows")
+                        except Exception as e:
+                            log("[history_flusher] DB error:", e)
+                            conn.rollback()
+            finally:
+                conn.close()
+        except Exception as e:
+            log("[history_flusher] fatal error, will retry in 5s:", e)
+            time.sleep(5)
+
 def main():
     t = Thread(target=flusher, daemon=True); t.start()
+    ht = Thread(target=history_flusher, daemon=True); ht.start()
     try:
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     except AttributeError:
@@ -175,7 +245,7 @@ def main():
 
     try:
         while not stop_event.is_set():
-            if not t.is_alive():
+            if not t.is_alive() or not ht.is_alive():
                 log("[main] flusher thread died, shutting down...")
                 stop_event.set()
             time.sleep(0.5)
