@@ -1,6 +1,8 @@
 services:
   postgres:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: postgres_db
     restart: always
     env_file: .env
@@ -23,6 +25,56 @@ services:
       - "5432:5432"
   
   
+  api:
+    build: ./api
+    container_name: ess-api
+    restart: always
+    env_file: .env
+    volumes:
+      - ./api:/app
+    working_dir: /app
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    depends_on:
+      postgres:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
+    ports:
+      - "8000:8000"
+
+  ingestor:
+    build: ./ingestor
+    depends_on:
+      postgres:
+        condition: service_healthy
+      emqx:
+        condition: service_healthy
+    env_file: .env
+    volumes:
+      - ./ingestor:/app
+    working_dir: /app
+    command: python main.py
+    restart: on-failure
+    deploy:
+      replicas: 2
+
+  emqx:
+    image: emqx/emqx:5.6.1
+    container_name: emqx
+    restart: always
+    ports:
+      - "${EMQX_MQTT_TCP_PORT}:1883"
+      - "${EMQX_WS_PORT}:8083"
+      - "${EMQX_DASHBOARD_PORT}:18083"
+    environment:
+      - EMQX_NAME=emqx
+      - EMQX_ALLOW_ANONYMOUS=true
+    healthcheck:
+      test: ["CMD", "emqx_ctl", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   pgbouncer:
     image: edoburu/pgbouncer
     container_name: pgbouncer
@@ -54,56 +106,6 @@ services:
     volumes:
       - pgadmin_data:/var/lib/pgadmin
       - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
-
-  emqx:
-    image: emqx/emqx:5.6.1
-    container_name: emqx
-    restart: always
-    ports:
-      - "${EMQX_MQTT_TCP_PORT}:1883"
-      - "${EMQX_WS_PORT}:8083"
-      - "${EMQX_DASHBOARD_PORT}:18083"
-    environment:
-      - EMQX_NAME=emqx
-      - EMQX_ALLOW_ANONYMOUS=true
-    healthcheck:
-      test: ["CMD", "emqx_ctl", "status"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
-  ingestor:
-    build: ./ingestor
-    depends_on:
-      postgres:
-        condition: service_healthy
-      emqx:
-        condition: service_healthy
-    env_file: .env
-    volumes:
-      - ./ingestor:/app
-    working_dir: /app
-    command: python main.py
-    restart: on-failure
-    deploy:
-      replicas: 2
-
-  api:
-    build: ./api
-    container_name: ess-api
-    restart: always
-    env_file: .env
-    volumes:
-      - ./api:/app
-    working_dir: /app
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-    depends_on:
-      postgres:
-        condition: service_healthy
-      pgbouncer:
-        condition: service_started
-    ports:
-      - "8000:8000"
 
 volumes:
   pg_data:
