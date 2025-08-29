@@ -56,7 +56,6 @@ services:
 
   ingestor:
     build: ./ingestor
-    container_name: ingestor
     depends_on:
       postgres:
         condition: service_healthy
