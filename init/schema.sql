@@ -1,7 +1,9 @@
 -- 1. 先建依赖表 (Create dependency tables first)
 CREATE TABLE IF NOT EXISTS users (
   id BIGSERIAL PRIMARY KEY,
-  username TEXT NOT NULL UNIQUE
+  username TEXT NOT NULL UNIQUE,
+  email TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS dealers (

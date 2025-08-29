@@ -5,11 +5,12 @@ from typing import List, Optional
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv(".env"), override=True)
 
-from fastapi import FastAPI, Query, HTTPException
-from pydantic import BaseModel
+from fastapi import FastAPI, Query, HTTPException, Depends
+from pydantic import BaseModel, EmailStr
 from pydantic_settings import BaseSettings
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy import text, select
+import bcrypt
 
 class Settings(BaseSettings):
     DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://admin:123456@localhost:5432/energy")
@@ -139,3 +140,45 @@ async def batch_realtime(
         d["online"] = online_flag(d["updated_at"], fresh)
         items.append(d)
     return {"items": items, "page": 1, "page_size": len(items), "total": len(items)}
+
+async_session = async_sessionmaker(engine, expire_on_commit=False)
+
+class UserRegister(BaseModel):
+    username: str
+    email: EmailStr
+    password: str
+
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
+@app.post("/api/v1/register")
+async def register(user: UserRegister):
+    async with async_session() as session:
+        # 检查用户名或邮箱是否已存在
+        result = await session.execute(
+            text("SELECT 1 FROM users WHERE username=:u OR email=:e"),
+            {"u": user.username, "e": user.email}
+        )
+        if result.first():
+            raise HTTPException(status_code=400, detail="用户名或邮箱已存在")
+        # 密码加密
+        pw_hash = bcrypt.hashpw(user.password.encode(), bcrypt.gensalt()).decode()
+        await session.execute(
+            text("INSERT INTO users (username, email, password_hash) VALUES (:u, :e, :p)"),
+            {"u": user.username, "e": user.email, "p": pw_hash}
+        )
+        await session.commit()
+    return {"msg": "注册成功"}
+
+@app.post("/api/v1/login")
+async def login(user: UserLogin):
+    async with async_session() as session:
+        result = await session.execute(
+            text("SELECT password_hash FROM users WHERE username=:u"),
+            {"u": user.username}
+        )
+        row = result.first()
+        if not row or not bcrypt.checkpw(user.password.encode(), row[0].encode()):
+            raise HTTPException(status_code=401, detail="用户名或密码错误")
+    return {"msg": "登录成功"}

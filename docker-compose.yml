@@ -88,6 +88,23 @@ services:
     deploy:
       replicas: 2
 
+  api:
+    build: ./api
+    container_name: ess-api
+    restart: always
+    env_file: .env
+    volumes:
+      - ./api:/app
+    working_dir: /app
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    depends_on:
+      postgres:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
+    ports:
+      - "8000:8000"
+
 volumes:
   pg_data:
   pgadmin_data:
