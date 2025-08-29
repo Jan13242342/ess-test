@@ -15,7 +15,7 @@ MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 MQTT_USERNAME = os.getenv("MQTT_USERNAME") or None
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD") or None
-MQTT_TOPIC = os.getenv("MQTT_TOPIC", "devices/+/realtime")
+MQTT_TOPIC = os.getenv("MQTT_TOPIC", "$share/ess-ingestor/devices/+/realtime")
 MQTT_QOS = int(os.getenv("MQTT_QOS", "1"))
 
 PG_DSN = (
