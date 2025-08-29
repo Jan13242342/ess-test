@@ -23,6 +23,23 @@ services:
       - "5432:5432"
   
   
+  pgbouncer:
+    image: edoburu/pgbouncer
+    container_name: pgbouncer
+    restart: always
+    depends_on:
+      - postgres
+    environment:
+      - DB_HOST=postgres_db
+      - DB_PORT=5432
+      - DB_USER=${POSTGRES_USER}
+      - DB_PASSWORD=${POSTGRES_PASSWORD}
+      - POOL_MODE=transaction
+      - MAX_CLIENT_CONN=2000
+      - DEFAULT_POOL_SIZE=50
+    ports:
+      - "6432:6432"
+
   pgadmin:
     image: dpage/pgadmin4:8
     container_name: pgadmin4
