@@ -13,7 +13,7 @@ from sqlalchemy import text, select
 import bcrypt
 
 class Settings(BaseSettings):
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://admin:123456@localhost:5432/energy")
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://admin:123456@pgbouncer:6432/energy")
     FRESH_SECS: int = int(os.getenv("FRESH_SECS", "60"))
 
 settings = Settings()
