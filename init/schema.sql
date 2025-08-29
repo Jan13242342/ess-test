@@ -134,17 +134,17 @@ SELECT cron.schedule(
 );
 
 -- 初始化10个测试用户 (Init 10 test users)
-INSERT INTO users (id, username) VALUES
-  (1, 'testuser1'),
-  (2, 'testuser2'),
-  (3, 'testuser3'),
-  (4, 'testuser4'),
-  (5, 'testuser5'),
-  (6, 'testuser6'),
-  (7, 'testuser7'),
-  (8, 'testuser8'),
-  (9, 'testuser9'),
-  (10, 'testuser10')
+INSERT INTO users (id, username, email, password_hash) VALUES
+  (1, 'testuser1', 'test1@example.com', 'dummyhash'),
+  (2, 'testuser2', 'test2@example.com', 'dummyhash'),
+  (3, 'testuser3', 'test3@example.com', 'dummyhash'),
+  (4, 'testuser4', 'test4@example.com', 'dummyhash'),
+  (5, 'testuser5', 'test5@example.com', 'dummyhash'),
+  (6, 'testuser6', 'test6@example.com', 'dummyhash'),
+  (7, 'testuser7', 'test7@example.com', 'dummyhash'),
+  (8, 'testuser8', 'test8@example.com', 'dummyhash'),
+  (9, 'testuser9', 'test9@example.com', 'dummyhash'),
+  (10, 'testuser10', 'test10@example.com', 'dummyhash')
 ON CONFLICT DO NOTHING;
 
 -- 初始化10个测试经销商 (Init 10 test dealers)
