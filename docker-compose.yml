@@ -68,6 +68,8 @@ services:
     working_dir: /app
     command: python main.py
     restart: on-failure
+    deploy:
+      replicas: 2
 
 volumes:
   pg_data:
