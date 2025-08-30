@@ -21,8 +21,8 @@ engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=True)
 app = FastAPI(title="ESS Realtime API", version="1.0.0")
 
 class RealtimeData(BaseModel):
-    dealer_id: str
-    device_id: str
+    dealer_id: int
+    device_id: int
     updated_at: datetime
     soc: int
     soh: int
