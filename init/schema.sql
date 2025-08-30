@@ -153,8 +153,8 @@ SELECT cron.schedule(
 -- 初始化2个超级管理员和5个客服，密码都是123456
 -- Initialize 2 super admins and 5 service users, password is 123456
 INSERT INTO users (username, email, password_hash, role) VALUES
-  ('admin1',   'admin1@example.com',   '$2b$12$eIX8b7QwQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'admin'),
-  ('admin2',   'admin2@example.com',   '$2b$12$eIX8b7QwQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'admin'),
+  ('admin1', 'admin1@example.com', '$2b$12$MQtJ8NIlVywD69WqqldUlOttvE2DKE.k44WFniAzLa6aCjMpzv.G.', 'admin'),
+  ('admin2', 'admin2@example.com', '$2b$12$eIX8b7QwQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'admin'),
   ('service1', 'service1@example.com', '$2b$12$eIX8b7QwQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'service'),
   ('service2', 'service2@example.com', '$2b$12$eIX8b7QwQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'service'),
   ('service3', 'service3@example.com', '$2b$12$eIX8b7QwQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'service'),
