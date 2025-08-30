@@ -22,9 +22,10 @@ settings = Settings()
 engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=True)
 app = FastAPI(title="ESS Realtime API", version="1.0.0")
 
-# 去掉 dealer_id 字段
+# 修改模型，增加 device_sn
 class RealtimeData(BaseModel):
     device_id: int
+    device_sn: str
     updated_at: datetime
     soc: int
     soh: int
@@ -59,13 +60,13 @@ class ListResponse(BaseModel):
     page_size: int
     total: int
 
-# 去掉 dealer_id 字段
+# 修改 COLUMNS，join devices 表时取 device_sn
 COLUMNS = """
-device_id, updated_at,
-soc, soh, pv, load, grid, grid_q, batt,
-ac_v, ac_f, v_a, v_b, v_c, i_a, i_b, i_c,
-p_a, p_b, p_c, q_a, q_b, q_c,
-e_pv_today, e_load_today, e_charge_today, e_discharge_today
+r.device_id, d.device_sn, r.updated_at,
+r.soc, r.soh, r.pv, r.load, r.grid, r.grid_q, r.batt,
+r.ac_v, r.ac_f, r.v_a, r.v_b, r.v_c, r.i_a, r.i_b, r.i_c,
+r.p_a, r.p_b, r.p_c, r.q_a, r.q_b, r.q_c,
+r.e_pv_today, r.e_load_today, r.e_charge_today, r.e_discharge_today
 """
 
 def online_flag(updated_at: datetime, fresh_secs: int) -> bool:
@@ -96,7 +97,12 @@ async def get_device_realtime(
     user=Depends(get_current_user)
 ):
     fresh = fresh_secs or settings.FRESH_SECS
-    sql = text(f"SELECT {COLUMNS} FROM ess_realtime_data WHERE device_id=:device_id")
+    sql = text(f"""
+        SELECT {COLUMNS}
+        FROM ess_realtime_data r
+        JOIN devices d ON r.device_id = d.id
+        WHERE r.device_id=:device_id
+    """)
     async with engine.connect() as conn:
         row = (await conn.execute(sql, {"device_id": device_id})).mappings().first()
         if not row:
@@ -108,6 +114,7 @@ async def get_device_realtime(
 @app.get("/api/v1/realtime", response_model=ListResponse)
 async def list_realtime(
     dealer_id: Optional[int] = None,
+    only_my: bool = Query(False, description="只查当前用户绑定的设备"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     fresh_secs: Optional[int] = None,
@@ -116,21 +123,22 @@ async def list_realtime(
     fresh = fresh_secs or settings.FRESH_SECS
     where = []
     params = {}
-    join_sql = ""
-    # 如果按经销商筛选，join devices 表
+    join_sql = "JOIN devices d ON r.device_id = d.id"
     if dealer_id:
-        join_sql = "JOIN devices d ON ess_realtime_data.device_id = d.id"
         where.append("d.dealer_id = :dealer_id")
         params["dealer_id"] = dealer_id
+    if only_my:
+        where.append("d.user_id = :user_id")
+        params["user_id"] = user["user_id"]
     cond = "WHERE " + " AND ".join(where) if where else ""
 
-    count_sql = text(f"SELECT COUNT(*) FROM ess_realtime_data {join_sql} {cond}")
+    count_sql = text(f"SELECT COUNT(*) FROM ess_realtime_data r {join_sql} {cond}")
     query_sql = text(f"""
         SELECT {COLUMNS}
-        FROM ess_realtime_data
+        FROM ess_realtime_data r
         {join_sql}
         {cond}
-        ORDER BY updated_at DESC
+        ORDER BY r.updated_at DESC
         LIMIT :limit OFFSET :offset
     """)
 
@@ -159,7 +167,12 @@ async def batch_realtime(
 
     placeholders = ",".join([f":id{i}" for i in range(len(ids))])
     params = {f"id{i}": v for i, v in enumerate(ids)}
-    sql = text(f"SELECT {COLUMNS} FROM ess_realtime_data WHERE device_id IN ({placeholders})")
+    sql = text(f"""
+        SELECT {COLUMNS}
+        FROM ess_realtime_data r
+        JOIN devices d ON r.device_id = d.id
+        WHERE r.device_id IN ({placeholders})
+    """)
     async with engine.connect() as conn:
         rows = (await conn.execute(sql, params)).mappings().all()
 
@@ -284,3 +297,26 @@ async def unbind_device(
             {"sn": device_sn}
         )
     return {"msg": "解绑成功", "device_sn": device_sn, "username": username}
+
+@app.get("/api/v1/realtime/by_sn/{device_sn}", response_model=RealtimeData)
+async def get_realtime_by_sn(
+    device_sn: str,
+    user=Depends(get_current_user)
+):
+    # 只允许管理员和客服访问
+    if user["role"] not in ("admin", "service"):
+        raise HTTPException(status_code=403, detail="无权限")
+    # 查找设备ID和实时数据
+    sql = text(f"""
+        SELECT {COLUMNS}
+        FROM ess_realtime_data r
+        JOIN devices d ON r.device_id = d.id
+        WHERE d.device_sn=:sn
+    """)
+    async with engine.connect() as conn:
+        row = (await conn.execute(sql, {"sn": device_sn})).mappings().first()
+        if not row:
+            raise HTTPException(status_code=404, detail="实时数据不存在")
+        d = dict(row)
+        d["online"] = online_flag(d["updated_at"], settings.FRESH_SECS)
+        return d
