@@ -67,7 +67,7 @@ async def healthz():
     return {"ok": True}
 
 @app.get("/api/v1/realtime/{device_id}", response_model=RealtimeData)
-async def get_device_realtime(device_id: str, fresh_secs: Optional[int] = None):
+async def get_device_realtime(device_id: int, fresh_secs: Optional[int] = None):
     fresh = fresh_secs or settings.FRESH_SECS
     sql = text(f"SELECT {COLUMNS} FROM ess_realtime_data WHERE device_id=:device_id")
     async with engine.connect() as conn:
