@@ -154,10 +154,10 @@ SELECT cron.schedule(
 -- Initialize 2 super admins and 5 service users, password is 123456
 INSERT INTO users (username, email, password_hash, role) VALUES
   ('admin1', 'admin1@example.com', '$2b$12$MQtJ8NIlVywD69WqqldUlOttvE2DKE.k44WFniAzLa6aCjMpzv.G.', 'admin'),
-  ('admin2', 'admin2@example.com', '$2b$12$eIX8b7QwQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'admin'),
-  ('service1', 'service1@example.com', '$2b$12$eIX8b7QwQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'service'),
-  ('service2', 'service2@example.com', '$2b$12$eIX8b7QwQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'service'),
-  ('service3', 'service3@example.com', '$2b$12$eIX8b7QwQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'service'),
-  ('service4', 'service4@example.com', '$2b$12$eIX8b7QwQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'service'),
-  ('service5', 'service5@example.com', '$2b$12$eIX8b7QwQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'service')
+  ('admin2', 'admin2@example.com', '$2b$12$MQtJ8NIlVywD69WqqldUlOttvE2DKE.k44WFniAzLa6aCjMpzv.G.', 'admin'),
+  ('service1', 'service1@example.com', '$2b$12$MQtJ8NIlVywD69WqqldUlOttvE2DKE.k44WFniAzLa6aCjMpzv.G.', 'service'),
+  ('service2', 'service2@example.com', '$2b$12$MQtJ8NIlVywD69WqqldUlOttvE2DKE.k44WFniAzLa6aCjMpzv.G.', 'service'),
+  ('service3', 'service3@example.com', '$2b$12$MQtJ8NIlVywD69WqqldUlOttvE2DKE.k44WFniAzLa6aCjMpzv.G.', 'service'),
+  ('service4', 'service4@example.com', '$2b$12$MQtJ8NIlVywD69WqqldUlOttvE2DKE.k44WFniAzLa6aCjMpzv.G.', 'service'),
+  ('service5', 'service5@example.com', '$2b$12$MQtJ8NIlVywD69WqqldUlOttvE2DKE.k44WFniAzLa6aCjMpzv.G.', 'service')
 ON CONFLICT DO NOTHING;
