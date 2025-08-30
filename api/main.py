@@ -5,7 +5,7 @@ from typing import List, Optional
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv(".env"), override=True)
 
-from fastapi import FastAPI, Query, HTTPException, Depends, Body
+from fastapi import FastAPI, Query, HTTPException, Depends, Body, Header
 from pydantic import BaseModel, EmailStr
 from pydantic_settings import BaseSettings
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
@@ -75,8 +75,24 @@ def online_flag(updated_at: datetime, fresh_secs: int) -> bool:
 async def healthz():
     return {"ok": True}
 
+def get_current_user(authorization: str = Header(...)):
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="无效的认证信息")
+    token = authorization[7:]
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        return payload  # payload 里有 user_id、username、role
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token已过期")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="无效的Token")
+
 @app.get("/api/v1/realtime/{device_id}", response_model=RealtimeData)
-async def get_device_realtime(device_id: int, fresh_secs: Optional[int] = None):
+async def get_device_realtime(
+    device_id: int,
+    fresh_secs: Optional[int] = None,
+    user=Depends(get_current_user)
+):
     fresh = fresh_secs or settings.FRESH_SECS
     sql = text(f"SELECT {COLUMNS} FROM ess_realtime_data WHERE device_id=:device_id")
     async with engine.connect() as conn:
@@ -89,10 +105,11 @@ async def get_device_realtime(device_id: int, fresh_secs: Optional[int] = None):
 
 @app.get("/api/v1/realtime", response_model=ListResponse)
 async def list_realtime(
-    dealer_id: Optional[int] = None,   # 这里改为 int
+    dealer_id: Optional[int] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     fresh_secs: Optional[int] = None,
+    user=Depends(get_current_user)
 ):
     fresh = fresh_secs or settings.FRESH_SECS
     where = []
@@ -125,7 +142,9 @@ async def list_realtime(
 
 @app.get("/api/v1/realtime/batch", response_model=ListResponse)
 async def batch_realtime(
-    device_ids: str, fresh_secs: Optional[int] = None,
+    device_ids: str,
+    fresh_secs: Optional[int] = None,
+    user=Depends(get_current_user)
 ):
     fresh = fresh_secs or settings.FRESH_SECS
     ids = [x.strip() for x in device_ids.split(",") if x.strip()]
@@ -201,20 +220,19 @@ async def login(user: UserLogin):
 @app.post("/api/v1/device/bind")
 async def bind_device(
     device_sn: str = Body(..., embed=True, description="设备SN"),
-    username: str = Body(..., embed=True, description="用户名")
+    username: str = Body(..., embed=True, description="用户名"),
+    user=Depends(get_current_user)
 ):
     async with engine.begin() as conn:
-        # 查找用户ID
         result = await conn.execute(
             text("SELECT id FROM users WHERE username=:username"),
             {"username": username}
         )
-        user = result.first()
-        if not user:
+        user_row = result.first()
+        if not user_row:
             raise HTTPException(status_code=404, detail="用户不存在")
-        user_id = user.id
+        user_id = user_row.id
 
-        # 查找设备
         result = await conn.execute(
             text("SELECT id, user_id FROM devices WHERE device_sn=:sn"),
             {"sn": device_sn}
@@ -224,7 +242,6 @@ async def bind_device(
             raise HTTPException(status_code=404, detail="设备不存在")
         if device.user_id == user_id:
             return {"msg": "设备已绑定到该用户", "device_sn": device_sn, "username": username}
-        # 绑定设备
         await conn.execute(
             text("UPDATE devices SET user_id=:user_id WHERE device_sn=:sn"),
             {"user_id": user_id, "sn": device_sn}
@@ -234,20 +251,19 @@ async def bind_device(
 @app.post("/api/v1/device/unbind")
 async def unbind_device(
     device_sn: str = Body(..., embed=True, description="设备SN"),
-    username: str = Body(..., embed=True, description="用户名")
+    username: str = Body(..., embed=True, description="用户名"),
+    user=Depends(get_current_user)
 ):
     async with engine.begin() as conn:
-        # 查找用户ID
         result = await conn.execute(
             text("SELECT id FROM users WHERE username=:username"),
             {"username": username}
         )
-        user = result.first()
-        if not user:
+        user_row = result.first()
+        if not user_row:
             raise HTTPException(status_code=404, detail="用户不存在")
-        user_id = user.id
+        user_id = user_row.id
 
-        # 查找设备
         result = await conn.execute(
             text("SELECT id, user_id FROM devices WHERE device_sn=:sn"),
             {"sn": device_sn}
@@ -257,7 +273,6 @@ async def unbind_device(
             raise HTTPException(status_code=404, detail="设备不存在")
         if device.user_id != user_id:
             raise HTTPException(status_code=403, detail="设备未绑定到该用户，无法解绑")
-        # 解绑设备
         await conn.execute(
             text("UPDATE devices SET user_id=NULL WHERE device_sn=:sn"),
             {"sn": device_sn}
