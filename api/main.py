@@ -11,6 +11,7 @@ from pydantic_settings import BaseSettings
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy import text, select
 import bcrypt
+import jwt
 
 class Settings(BaseSettings):
     DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://admin:123456@pgbouncer:6432/energy")
@@ -155,6 +156,9 @@ class UserLogin(BaseModel):
     username: str
     password: str
 
+JWT_SECRET = os.getenv("JWT_SECRET", "your_jwt_secret_key")
+JWT_ALGORITHM = "HS256"
+
 @app.post("/api/v1/register")
 async def register(user: UserRegister):
     async with async_session() as session:
@@ -178,13 +182,21 @@ async def register(user: UserRegister):
 async def login(user: UserLogin):
     async with async_session() as session:
         result = await session.execute(
-            text("SELECT password_hash FROM users WHERE username=:u"),
+            text("SELECT id, username, role, password_hash FROM users WHERE username=:u"),
             {"u": user.username}
         )
         row = result.first()
-        if not row or not bcrypt.checkpw(user.password.encode(), row[0].encode()):
+        if not row or not bcrypt.checkpw(user.password.encode(), row.password_hash.encode()):
             raise HTTPException(status_code=401, detail="用户名或密码错误")
-    return {"msg": "登录成功"}
+        # 生成JWT token
+        payload = {
+            "user_id": row.id,
+            "username": row.username,
+            "role": row.role,
+            "exp": datetime.utcnow() + timedelta(hours=1)
+        }
+        token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return {"msg": "登录成功", "token": token}
 
 @app.post("/api/v1/device/bind")
 async def bind_device(
