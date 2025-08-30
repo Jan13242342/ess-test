@@ -34,7 +34,6 @@ stop_event = Event()
 q: Queue[dict] = Queue(maxsize=QUEUE_MAXSIZE)
 
 FIELDS = [
-    "dealer_id",
     "device_id",
     "soc", "soh",
     "pv", "load", "grid", "grid_q", "batt",
@@ -62,7 +61,6 @@ def to_int(v, default=0):
 def normalize(sn: str, payload: dict) -> dict:
     d = {k: 0 for k in FIELDS}
     d["device_id"] = int(sn)
-    d["dealer_id"] = int(payload.get("dealer_id") or 0)
     d["soc"] = to_int(payload.get("soc"), 0)
     d["soh"] = to_int(payload.get("soh"), 100)
     for k in [
@@ -79,7 +77,7 @@ def normalize(sn: str, payload: dict) -> dict:
 
 UPSERT_SQL = """
 INSERT INTO ess_realtime_data (
-  dealer_id, device_id, updated_at,
+  device_id, updated_at,
   soc, soh,
   pv, load, grid, grid_q, batt,
   ac_v, ac_f,
@@ -89,7 +87,7 @@ INSERT INTO ess_realtime_data (
   q_a, q_b, q_c,
   e_pv_today, e_load_today, e_charge_today, e_discharge_today
 ) VALUES (
-  %(dealer_id)s, %(device_id)s, now(),
+  %(device_id)s, now(),
   %(soc)s, %(soh)s,
   %(pv)s, %(load)s, %(grid)s, %(grid_q)s, %(batt)s,
   %(ac_v)s, %(ac_f)s,
@@ -100,7 +98,6 @@ INSERT INTO ess_realtime_data (
   %(e_pv_today)s, %(e_load_today)s, %(e_charge_today)s, %(e_discharge_today)s
 )
 ON CONFLICT (device_id) DO UPDATE SET
-  dealer_id=EXCLUDED.dealer_id,
   updated_at=now(),
   soc=EXCLUDED.soc, soh=EXCLUDED.soh,
   pv=EXCLUDED.pv, load=EXCLUDED.load, grid=EXCLUDED.grid, grid_q=EXCLUDED.grid_q, batt=EXCLUDED.batt,
@@ -170,6 +167,17 @@ def on_message(client, userdata, msg):
     except Exception as e:
         log("[on_message] error:", e)
 
+def ensure_devices_exist(cur, batch):
+    # 批量 upsert 设备，避免外键约束报错
+    device_ids = set(row["device_id"] for row in batch)
+    if not device_ids:
+        return
+    execute_batch(
+        cur,
+        "INSERT INTO devices (id, device_sn, created_at) VALUES (%s, %s, now()) ON CONFLICT (id) DO NOTHING;",
+        [(did, f"SN{did:04d}") for did in device_ids]
+    )
+
 def flusher():
     while not stop_event.is_set():
         try:
@@ -187,6 +195,7 @@ def flusher():
                     if batch:
                         try:
                             with conn.cursor() as cur:
+                                ensure_devices_exist(cur, batch)  # 先批量 upsert 设备
                                 execute_batch(cur, UPSERT_SQL, batch, page_size=1000)
                             conn.commit()
                             log(f"[DB] upsert {len(batch)} rows")
@@ -198,6 +207,17 @@ def flusher():
         except Exception as e:
             log("[flusher] fatal error, will retry in 5s:", e)
             time.sleep(5)
+
+def ensure_devices_exist_history(cur, batch):
+    # 批量 upsert 设备，避免外键约束报错
+    device_ids = set(row["device_id"] for row in batch)
+    if not device_ids:
+        return
+    execute_batch(
+        cur,
+        "INSERT INTO devices (id, device_sn, created_at) VALUES (%s, %s, now()) ON CONFLICT (id) DO NOTHING;",
+        [(did, f"SN{did:04d}") for did in device_ids]
+    )
 
 def history_flusher():
     while not stop_event.is_set():
@@ -216,6 +236,7 @@ def history_flusher():
                     if batch:
                         try:
                             with conn.cursor() as cur:
+                                ensure_devices_exist_history(cur, batch)  # 先批量 upsert 设备
                                 execute_batch(cur, HISTORY_UPSERT_SQL, batch, page_size=1000)
                             conn.commit()
                             log(f"[DB] upsert history {len(batch)} rows")
