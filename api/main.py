@@ -74,10 +74,6 @@ def online_flag(updated_at: datetime, fresh_secs: int) -> bool:
         updated_at = updated_at.replace(tzinfo=timezone.utc)
     return (datetime.now(timezone.utc) - updated_at) <= timedelta(seconds=fresh_secs)
 
-@app.get("/healthz")
-async def healthz():
-    return {"ok": True}
-
 bearer_scheme = HTTPBearer()
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
@@ -89,27 +85,6 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_
         raise HTTPException(status_code=401, detail="Token已过期")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="无效的Token")
-
-@app.get("/api/v1/realtime/{device_id}", response_model=RealtimeData)
-async def get_device_realtime(
-    device_id: int,
-    fresh_secs: Optional[int] = None,
-    user=Depends(get_current_user)
-):
-    fresh = fresh_secs or settings.FRESH_SECS
-    sql = text(f"""
-        SELECT {COLUMNS}
-        FROM ess_realtime_data r
-        JOIN devices d ON r.device_id = d.id
-        WHERE r.device_id=:device_id
-    """)
-    async with engine.connect() as conn:
-        row = (await conn.execute(sql, {"device_id": device_id})).mappings().first()
-        if not row:
-            raise HTTPException(status_code=404, detail="device not found")
-        d = dict(row)
-        d["online"] = online_flag(d["updated_at"], fresh)
-        return d
 
 # ================= 用户专用接口 =================
 
