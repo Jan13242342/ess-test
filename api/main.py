@@ -6,6 +6,7 @@ from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv(".env"), override=True)
 
 from fastapi import FastAPI, Query, HTTPException, Depends, Body, Header
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
 from pydantic_settings import BaseSettings
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
@@ -75,10 +76,10 @@ def online_flag(updated_at: datetime, fresh_secs: int) -> bool:
 async def healthz():
     return {"ok": True}
 
-def get_current_user(authorization: str = Header(...)):
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="无效的认证信息")
-    token = authorization[7:]
+bearer_scheme = HTTPBearer()
+
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
+    token = credentials.credentials
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         return payload  # payload 里有 user_id、username、role
