@@ -5,7 +5,7 @@ from typing import List, Optional
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv(".env"), override=True)
 
-from fastapi import FastAPI, Query, HTTPException, Depends, Body, Header
+from fastapi import FastAPI, Query, HTTPException, Depends, Body
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
 from pydantic_settings import BaseSettings
@@ -22,8 +22,8 @@ settings = Settings()
 engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=True)
 app = FastAPI(title="ESS Realtime API", version="1.0.0")
 
+# 去掉 dealer_id 字段
 class RealtimeData(BaseModel):
-    dealer_id: int
     device_id: int
     updated_at: datetime
     soc: int
@@ -59,8 +59,9 @@ class ListResponse(BaseModel):
     page_size: int
     total: int
 
+# 去掉 dealer_id 字段
 COLUMNS = """
-dealer_id, device_id, updated_at,
+device_id, updated_at,
 soc, soh, pv, load, grid, grid_q, batt,
 ac_v, ac_f, v_a, v_b, v_c, i_a, i_b, i_c,
 p_a, p_b, p_c, q_a, q_b, q_c,
@@ -115,15 +116,19 @@ async def list_realtime(
     fresh = fresh_secs or settings.FRESH_SECS
     where = []
     params = {}
+    join_sql = ""
+    # 如果按经销商筛选，join devices 表
     if dealer_id:
-        where.append("dealer_id = :dealer_id")
+        join_sql = "JOIN devices d ON ess_realtime_data.device_id = d.id"
+        where.append("d.dealer_id = :dealer_id")
         params["dealer_id"] = dealer_id
     cond = "WHERE " + " AND ".join(where) if where else ""
 
-    count_sql = text(f"SELECT COUNT(*) FROM ess_realtime_data {cond}")
+    count_sql = text(f"SELECT COUNT(*) FROM ess_realtime_data {join_sql} {cond}")
     query_sql = text(f"""
         SELECT {COLUMNS}
         FROM ess_realtime_data
+        {join_sql}
         {cond}
         ORDER BY updated_at DESC
         LIMIT :limit OFFSET :offset

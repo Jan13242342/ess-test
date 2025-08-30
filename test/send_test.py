@@ -16,7 +16,7 @@ def build_history_topic(device_id) -> str:
 def rnd(a, b):
     return random.randint(a, b)
 
-def gen_payload(dealer_id: int, device_id: int) -> dict:
+def gen_payload(device_id: int) -> dict:
     soc  = rnd(0, 100)
     soh  = rnd(95, 100)
     pv   = rnd(0, 3500)
@@ -26,7 +26,6 @@ def gen_payload(dealer_id: int, device_id: int) -> dict:
     batt = pv - load - grid
     base_v = rnd(228000, 233000)  # mV
     return {
-        "dealer_id": dealer_id,
         "soc": soc, "soh": soh,
         "pv": pv, "load": load, "grid": grid, "grid_q": grid_q, "batt": batt,
         "ac_v": base_v, "ac_f": 5000,
@@ -47,7 +46,7 @@ def gen_history_payload(device_id: int, ts: str) -> dict:
         "pv_wh_total": rnd(10000, 50000)
     }
 
-def device_worker(device_id, dealer_id, interval=2, history_interval=10):
+def device_worker(device_id, interval=2, history_interval=10):
     while True:
         try:
             client = mqtt.Client()
@@ -57,13 +56,13 @@ def device_worker(device_id, dealer_id, interval=2, history_interval=10):
             history_topic = build_history_topic(device_id)
             last_history = time.time()
             while True:
-                # 发送实时数据
-                payload = gen_payload(dealer_id, device_id)
+                # 发送实时数据（不带dealer_id和user_id）
+                payload = gen_payload(device_id)
                 result = client.publish(topic, str(payload).replace("'", '"'), qos=MQTT_QOS)
                 if result.rc != 0:
                     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] device_id={device_id} publish失败: {result.rc}")
                     break
-                print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] device_id={device_id} dealer_id={dealer_id} sent to {topic}")
+                print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] device_id={device_id} sent to {topic}")
                 # 定时发送历史数据
                 if time.time() - last_history >= history_interval:
                     ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -88,7 +87,7 @@ def device_worker(device_id, dealer_id, interval=2, history_interval=10):
 if __name__ == "__main__":
     threads = []
     for n in range(1, 11):
-        t = threading.Thread(target=device_worker, args=(n, n), daemon=True)
+        t = threading.Thread(target=device_worker, args=(n,), daemon=True)
         t.start()
         threads.append(t)
     while True:

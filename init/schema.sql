@@ -57,7 +57,6 @@ CREATE INDEX IF NOT EXISTS ix_devices_unbound_created
 -- 实时数据表：存储设备的最新数据
 -- Realtime data table: stores latest data for each device
 CREATE TABLE IF NOT EXISTS ess_realtime_data (
-  dealer_id BIGINT REFERENCES dealers(id) ON DELETE SET NULL, -- 经销商ID / Dealer ID
   device_id BIGINT PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE, -- 设备ID / Device ID
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), -- 更新时间 / Update time
   soc SMALLINT NOT NULL CHECK (soc BETWEEN 0 AND 100), -- 剩余电量 / State of charge
@@ -89,7 +88,6 @@ CREATE TABLE IF NOT EXISTS ess_realtime_data (
 
 -- 实时数据表索引
 -- Realtime data table indexes
-CREATE INDEX IF NOT EXISTS idx_ess_dealer   ON ess_realtime_data (dealer_id);
 CREATE INDEX IF NOT EXISTS idx_ess_updated  ON ess_realtime_data (updated_at DESC);
 
 -- 历史能耗数据表（分区表）
@@ -150,8 +148,7 @@ SELECT cron.schedule(
   'SELECT create_next_history_energy_partition();'
 );
 
--- 初始化2个超级管理员和5个客服，密码都是123456
--- Initialize 2 super admins and 5 service users, password is 123456
+-- 初始化2个超级管理员和5个客服
 INSERT INTO users (username, email, password_hash, role) VALUES
   ('admin1', 'admin1@example.com', '$2b$12$MQtJ8NIlVywD69WqqldUlOttvE2DKE.k44WFniAzLa6aCjMpzv.G.', 'admin'),
   ('admin2', 'admin2@example.com', '$2b$12$MQtJ8NIlVywD69WqqldUlOttvE2DKE.k44WFniAzLa6aCjMpzv.G.', 'admin'),
@@ -161,3 +158,4 @@ INSERT INTO users (username, email, password_hash, role) VALUES
   ('service4', 'service4@example.com', '$2b$12$MQtJ8NIlVywD69WqqldUlOttvE2DKE.k44WFniAzLa6aCjMpzv.G.', 'service'),
   ('service5', 'service5@example.com', '$2b$12$MQtJ8NIlVywD69WqqldUlOttvE2DKE.k44WFniAzLa6aCjMpzv.G.', 'service')
 ON CONFLICT DO NOTHING;
+
