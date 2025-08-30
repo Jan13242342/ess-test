@@ -111,7 +111,9 @@ async def get_device_realtime(
         d["online"] = online_flag(d["updated_at"], fresh)
         return d
 
-@app.get("/api/v1/realtime", response_model=ListResponse)
+# ================= 用户专用接口 =================
+
+@app.get("/api/v1/realtime", response_model=ListResponse, tags=["用户"])
 async def list_realtime(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
@@ -149,34 +151,32 @@ async def list_realtime(
         items.append(d)
     return {"items": items, "page": page, "page_size": page_size, "total": total}
 
-@app.get("/api/v1/realtime/batch", response_model=ListResponse)
-async def batch_realtime(
-    device_ids: str,
-    fresh_secs: Optional[int] = None,
+# ================= 管理员/客服专用接口 =================
+
+@app.get("/api/v1/realtime/by_sn/{device_sn}", response_model=RealtimeData, tags=["管理员/客服"])
+async def get_realtime_by_sn(
+    device_sn: str,
     user=Depends(get_current_user)
 ):
-    fresh = fresh_secs or settings.FRESH_SECS
-    ids = [x.strip() for x in device_ids.split(",") if x.strip()]
-    if not ids:
-        return {"items": [], "page": 1, "page_size": 0, "total": 0}
-
-    placeholders = ",".join([f":id{i}" for i in range(len(ids))])
-    params = {f"id{i}": v for i, v in enumerate(ids)}
+    # 只允许管理员和客服访问
+    if user["role"] not in ("admin", "service"):
+        raise HTTPException(status_code=403, detail="无权限")
+    # 查找设备ID和实时数据
     sql = text(f"""
         SELECT {COLUMNS}
         FROM ess_realtime_data r
         JOIN devices d ON r.device_id = d.id
-        WHERE r.device_id IN ({placeholders})
+        WHERE d.device_sn=:sn
     """)
     async with engine.connect() as conn:
-        rows = (await conn.execute(sql, params)).mappings().all()
+        row = (await conn.execute(sql, {"sn": device_sn})).mappings().first()
+        if not row:
+            raise HTTPException(status_code=404, detail="实时数据不存在")
+        d = dict(row)
+        d["online"] = online_flag(d["updated_at"], settings.FRESH_SECS)
+        return d
 
-    items = []
-    for r in rows:
-        d = dict(r)
-        d["online"] = online_flag(d["updated_at"], fresh)
-        items.append(d)
-    return {"items": items, "page": 1, "page_size": len(items), "total": len(items)}
+# 其它接口如注册、登录、设备绑定等可以加 tags=["用户"]，如需更多管理员/客服接口也可加 tags=["管理员/客服"]
 
 async_session = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -292,26 +292,3 @@ async def unbind_device(
             {"sn": device_sn}
         )
     return {"msg": "解绑成功", "device_sn": device_sn, "username": username}
-
-@app.get("/api/v1/realtime/by_sn/{device_sn}", response_model=RealtimeData)
-async def get_realtime_by_sn(
-    device_sn: str,
-    user=Depends(get_current_user)
-):
-    # 只允许管理员和客服访问
-    if user["role"] not in ("admin", "service"):
-        raise HTTPException(status_code=403, detail="无权限")
-    # 查找设备ID和实时数据
-    sql = text(f"""
-        SELECT {COLUMNS}
-        FROM ess_realtime_data r
-        JOIN devices d ON r.device_id = d.id
-        WHERE d.device_sn=:sn
-    """)
-    async with engine.connect() as conn:
-        row = (await conn.execute(sql, {"sn": device_sn})).mappings().first()
-        if not row:
-            raise HTTPException(status_code=404, detail="实时数据不存在")
-        d = dict(row)
-        d["online"] = online_flag(d["updated_at"], settings.FRESH_SECS)
-        return d
