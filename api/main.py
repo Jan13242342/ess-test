@@ -33,10 +33,18 @@ class RealtimeData(BaseModel):
     batt: int
     ac_v: int
     ac_f: int
-    v_a: int; v_b: int; v_c: int
-    i_a: int; i_b: int; i_c: int
-    p_a: int; p_b: int; p_c: int
-    q_a: int; q_b: int; q_c: int
+    v_a: int
+    v_b: int
+    v_c: int
+    i_a: int
+    i_b: int
+    i_c: int
+    p_a: int
+    p_b: int
+    p_c: int
+    q_a: int
+    q_b: int
+    q_c: int
     e_pv_today: int
     e_load_today: int
     e_charge_today: int
@@ -80,7 +88,7 @@ async def get_device_realtime(device_id: int, fresh_secs: Optional[int] = None):
 
 @app.get("/api/v1/realtime", response_model=ListResponse)
 async def list_realtime(
-    dealer_id: Optional[str] = None,
+    dealer_id: Optional[int] = None,   # 这里改为 int
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     fresh_secs: Optional[int] = None,
