@@ -113,24 +113,19 @@ async def get_device_realtime(
 
 @app.get("/api/v1/realtime", response_model=ListResponse)
 async def list_realtime(
-    dealer_id: Optional[int] = None,
-    only_my: bool = Query(False, description="只查当前用户绑定的设备"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     fresh_secs: Optional[int] = None,
     user=Depends(get_current_user)
 ):
+    # 只允许普通用户访问，管理员和客服不用这个接口
+    if user["role"] in ("admin", "service"):
+        raise HTTPException(status_code=403, detail="管理员和客服请使用专用接口")
     fresh = fresh_secs or settings.FRESH_SECS
-    where = []
-    params = {}
+    where = ["d.user_id = :user_id"]
+    params = {"user_id": user["user_id"]}
     join_sql = "JOIN devices d ON r.device_id = d.id"
-    if dealer_id:
-        where.append("d.dealer_id = :dealer_id")
-        params["dealer_id"] = dealer_id
-    if only_my:
-        where.append("d.user_id = :user_id")
-        params["user_id"] = user["user_id"]
-    cond = "WHERE " + " AND ".join(where) if where else ""
+    cond = "WHERE " + " AND ".join(where)
 
     count_sql = text(f"SELECT COUNT(*) FROM ess_realtime_data r {join_sql} {cond}")
     query_sql = text(f"""
