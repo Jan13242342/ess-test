@@ -5,7 +5,7 @@ from typing import List, Optional
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv(".env"), override=True)
 
-from fastapi import FastAPI, Query, HTTPException, Depends
+from fastapi import FastAPI, Query, HTTPException, Depends, Body
 from pydantic import BaseModel, EmailStr
 from pydantic_settings import BaseSettings
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
@@ -185,3 +185,69 @@ async def login(user: UserLogin):
         if not row or not bcrypt.checkpw(user.password.encode(), row[0].encode()):
             raise HTTPException(status_code=401, detail="用户名或密码错误")
     return {"msg": "登录成功"}
+
+@app.post("/api/v1/device/bind")
+async def bind_device(
+    device_sn: str = Body(..., embed=True, description="设备SN"),
+    username: str = Body(..., embed=True, description="用户名")
+):
+    async with engine.begin() as conn:
+        # 查找用户ID
+        result = await conn.execute(
+            text("SELECT id FROM users WHERE username=:username"),
+            {"username": username}
+        )
+        user = result.first()
+        if not user:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        user_id = user.id
+
+        # 查找设备
+        result = await conn.execute(
+            text("SELECT id, user_id FROM devices WHERE device_sn=:sn"),
+            {"sn": device_sn}
+        )
+        device = result.first()
+        if not device:
+            raise HTTPException(status_code=404, detail="设备不存在")
+        if device.user_id == user_id:
+            return {"msg": "设备已绑定到该用户", "device_sn": device_sn, "username": username}
+        # 绑定设备
+        await conn.execute(
+            text("UPDATE devices SET user_id=:user_id WHERE device_sn=:sn"),
+            {"user_id": user_id, "sn": device_sn}
+        )
+    return {"msg": "绑定成功", "device_sn": device_sn, "username": username}
+
+@app.post("/api/v1/device/unbind")
+async def unbind_device(
+    device_sn: str = Body(..., embed=True, description="设备SN"),
+    username: str = Body(..., embed=True, description="用户名")
+):
+    async with engine.begin() as conn:
+        # 查找用户ID
+        result = await conn.execute(
+            text("SELECT id FROM users WHERE username=:username"),
+            {"username": username}
+        )
+        user = result.first()
+        if not user:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        user_id = user.id
+
+        # 查找设备
+        result = await conn.execute(
+            text("SELECT id, user_id FROM devices WHERE device_sn=:sn"),
+            {"sn": device_sn}
+        )
+        device = result.first()
+        if not device:
+            raise HTTPException(status_code=404, detail="设备不存在")
+        if device.user_id != user_id:
+            raise HTTPException(status_code=403, detail="设备未绑定到该用户，无法解绑")
+        # 解绑设备
+        await conn.execute(
+            text("UPDATE devices SET user_id=NULL WHERE device_sn=:sn"),
+            {"sn": device_sn}
+        )
+    return {"msg": "解绑成功", "device_sn": device_sn, "username": username}
