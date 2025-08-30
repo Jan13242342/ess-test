@@ -3,7 +3,8 @@ CREATE TABLE IF NOT EXISTS users (
   id BIGSERIAL PRIMARY KEY,
   username TEXT NOT NULL UNIQUE,
   email TEXT NOT NULL UNIQUE,
-  password_hash TEXT NOT NULL
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'user'
 );
 
 CREATE TABLE IF NOT EXISTS dealers (
@@ -147,18 +148,18 @@ INSERT INTO users (username, email, password_hash) VALUES
   ('testuser10', 'test10@example.com', 'dummyhash')
 ON CONFLICT DO NOTHING;
 
--- 初始化10个测试经销商 (Init 10 test dealers)
-INSERT INTO dealers (id, name) VALUES
-  (1, '测试经销商1'),
-  (2, '测试经销商2'),
-  (3, '测试经销商3'),
-  (4, '测试经销商4'),
-  (5, '测试经销商5'),
-  (6, '测试经销商6'),
-  (7, '测试经销商7'),
-  (8, '测试经销商8'),
-  (9, '测试经销商9'),
-  (10, '测试经销商10')
+-- 初始化2个超级管理员、5个客服和3个普通用户，密码都是123456
+INSERT INTO users (username, email, password_hash, role) VALUES
+  ('admin1', 'admin1@example.com', '$2b$12$KIXQ4b6zQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'admin'),
+  ('admin2', 'admin2@example.com', '$2b$12$KIXQ4b6zQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'admin'),
+  ('service1', 'service1@example.com', '$2b$12$KIXQ4b6zQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'service'),
+  ('service2', 'service2@example.com', '$2b$12$KIXQ4b6zQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'service'),
+  ('service3', 'service3@example.com', '$2b$12$KIXQ4b6zQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'service'),
+  ('service4', 'service4@example.com', '$2b$12$KIXQ4b6zQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'service'),
+  ('service5', 'service5@example.com', '$2b$12$KIXQ4b6zQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'service'),
+  ('user1', 'user1@example.com', '$2b$12$KIXQ4b6zQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'user'),
+  ('user2', 'user2@example.com', '$2b$12$KIXQ4b6zQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'user'),
+  ('user3', 'user3@example.com', '$2b$12$KIXQ4b6zQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'user')
 ON CONFLICT DO NOTHING;
 ------------------------------------------
 ------------------------------------------
@@ -177,4 +178,18 @@ INSERT INTO devices (
   (8, 'SN008', 'MODEL_X', 'v1.0', 8, 8, NULL, 'active', now(), now()),
   (9, 'SN009', 'MODEL_X', 'v1.0', 9, 9, NULL, 'active', now(), now()),
   (10, 'SN010', 'MODEL_X', 'v1.0', 10, 10, NULL, 'active', now(), now())
+ON CONFLICT DO NOTHING;
+
+-- 初始化10个经销商 (Init 10 dealers)
+INSERT INTO dealers (name) VALUES
+  ('dealer1'),
+  ('dealer2'),
+  ('dealer3'),
+  ('dealer4'),
+  ('dealer5'),
+  ('dealer6'),
+  ('dealer7'),
+  ('dealer8'),
+  ('dealer9'),
+  ('dealer10')
 ON CONFLICT DO NOTHING;
