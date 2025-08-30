@@ -153,11 +153,11 @@ SELECT cron.schedule(
 -- 初始化2个超级管理员和5个客服，密码都是123456
 -- Initialize 2 super admins and 5 service users, password is 123456
 INSERT INTO users (username, email, password_hash, role) VALUES
-  ('admin1', 'admin1@example.com', '$2b$12$KIXQ4b6zQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'admin'),
-  ('admin2', 'admin2@example.com', '$2b$12$KIXQ4b6zQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'admin'),
-  ('service1', 'service1@example.com', '$2b$12$KIXQ4b6zQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'service'),
-  ('service2', 'service2@example.com', '$2b$12$KIXQ4b6zQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'service'),
-  ('service3', 'service3@example.com', '$2b$12$KIXQ4b6zQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'service'),
-  ('service4', 'service4@example.com', '$2b$12$KIXQ4b6zQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'service'),
-  ('service5', 'service5@example.com', '$2b$12$KIXQ4b6zQ6b6Q6b6Q6b6QeQ6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q6b6Q', 'service')
+  ('admin1',   'admin1@example.com',   '$2b$12$$2b$12$HzY9qb66Sq.Qu8nE7Fi5/uA9HhDcEw4OAxc6wE/U7TSxQBrLGFS/K', 'admin'),
+  ('admin2',   'admin2@example.com',   '$2b$12$$2b$12$HzY9qb66Sq.Qu8nE7Fi5/uA9HhDcEw4OAxc6wE/U7TSxQBrLGFS/K', 'admin'),
+  ('service1', 'service1@example.com', '$2b$12$$2b$12$HzY9qb66Sq.Qu8nE7Fi5/uA9HhDcEw4OAxc6wE/U7TSxQBrLGFS/K', 'service'),
+  ('service2', 'service2@example.com', '$2b$12$$2b$12$HzY9qb66Sq.Qu8nE7Fi5/uA9HhDcEw4OAxc6wE/U7TSxQBrLGFS/K', 'service'),
+  ('service3', 'service3@example.com', '$2b$12$$2b$12$HzY9qb66Sq.Qu8nE7Fi5/uA9HhDcEw4OAxc6wE/U7TSxQBrLGFS/K', 'service'),
+  ('service4', 'service4@example.com', '$2b$12$$2b$12$HzY9qb66Sq.Qu8nE7Fi5/uA9HhDcEw4OAxc6wE/U7TSxQBrLGFS/K', 'service'),
+  ('service5', 'service5@example.com', '$2b$12$$2b$12$HzY9qb66Sq.Qu8nE7Fi5/uA9HhDcEw4OAxc6wE/U7TSxQBrLGFS/K', 'service')
 ON CONFLICT DO NOTHING;
