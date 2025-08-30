@@ -6,8 +6,8 @@
 echo "正在构建镜像... (Building Docker images...)"
 docker compose build --no-cache
 
-echo "启动所有服务，并将 ingestor 扩容为2个实例... (Starting all services and scaling ingestor to 2 instances...)"
-docker compose up -d --scale ingestor=2
+echo "启动所有服务... (Starting all services...)"
+docker compose up -d
 
 echo "所有服务已启动！ (All services started!)"
 echo "EMQX Dashboard: http://localhost:18083"

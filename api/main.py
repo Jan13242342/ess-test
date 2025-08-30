@@ -21,7 +21,6 @@ engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=True)
 app = FastAPI(title="ESS Realtime API", version="1.0.0")
 
 class RealtimeData(BaseModel):
-    customer_id: str
     dealer_id: str
     device_id: str
     updated_at: datetime
@@ -51,7 +50,7 @@ class ListResponse(BaseModel):
     total: int
 
 COLUMNS = """
-customer_id, dealer_id, device_id, updated_at,
+dealer_id, device_id, updated_at,
 soc, soh, pv, load, grid, grid_q, batt,
 ac_v, ac_f, v_a, v_b, v_c, i_a, i_b, i_c,
 p_a, p_b, p_c, q_a, q_b, q_c,
@@ -81,7 +80,6 @@ async def get_device_realtime(device_id: str, fresh_secs: Optional[int] = None):
 
 @app.get("/api/v1/realtime", response_model=ListResponse)
 async def list_realtime(
-    customer_id: Optional[str] = None,
     dealer_id: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
@@ -90,9 +88,6 @@ async def list_realtime(
     fresh = fresh_secs or settings.FRESH_SECS
     where = []
     params = {}
-    if customer_id:
-        where.append("customer_id = :customer_id")
-        params["customer_id"] = customer_id
     if dealer_id:
         where.append("dealer_id = :dealer_id")
         params["dealer_id"] = dealer_id
