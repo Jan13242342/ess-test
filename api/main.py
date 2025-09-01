@@ -86,9 +86,9 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="无效的Token")
 
-# ================= 用户专用接口 =================
+# ================= 用户专用接口 / User APIs =================
 
-@app.get("/api/v1/realtime", response_model=ListResponse, tags=["用户"])
+@app.get("/api/v1/realtime", response_model=ListResponse, tags=["用户 | User"])
 async def list_realtime(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
@@ -126,9 +126,9 @@ async def list_realtime(
         items.append(d)
     return {"items": items, "page": page, "page_size": page_size, "total": total}
 
-# ================= 管理员/客服专用接口 =================
+# ================= 管理员/客服专用接口 / Admin & Service APIs =================
 
-@app.get("/api/v1/realtime/by_sn/{device_sn}", response_model=RealtimeData, tags=["管理员/客服"])
+@app.get("/api/v1/realtime/by_sn/{device_sn}", response_model=RealtimeData, tags=["管理员/客服 | Admin/Service"])
 async def get_realtime_by_sn(
     device_sn: str,
     user=Depends(get_current_user)
@@ -151,7 +151,7 @@ async def get_realtime_by_sn(
         d["online"] = online_flag(d["updated_at"], settings.FRESH_SECS)
         return d
 
-# 其它接口如注册、登录、设备绑定等可以加 tags=["用户"]，如需更多管理员/客服接口也可加 tags=["管理员/客服"]
+# 其它接口如注册、登录、设备绑定等可以加 tags=["用户 | User"]，如需更多管理员/客服接口也可加 tags=["管理员/客服 | Admin/Service"]
 
 async_session = async_sessionmaker(engine, expire_on_commit=False)
 
