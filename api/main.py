@@ -10,7 +10,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
 from pydantic_settings import BaseSettings
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy import text, select
+from sqlalchemy import text, select, func
 import bcrypt
 import jwt
 
@@ -303,3 +303,84 @@ async def unbind_device(
         "device_sn": device_sn,
         "username": username
     }
+
+from sqlalchemy import func
+
+class HistoryDataAgg(BaseModel):
+    device_id: int
+    device_sn: str
+    day: date
+    charge_wh_total: Optional[int]
+    discharge_wh_total: Optional[int]
+    pv_wh_total: Optional[int]
+
+class HistoryAggListResponse(BaseModel):
+    items: List[HistoryDataAgg]
+    page: int
+    page_size: int
+    total: int
+
+@app.get("/api/v1/history", response_model=HistoryAggListResponse, tags=["用户 | User"])
+async def list_history(
+    device_id: int,
+    start: Optional[datetime] = Query(None, description="开始时间（ISO8601，默认当天0点）"),
+    end: Optional[datetime] = Query(None, description="结束时间（ISO8601，默认当天23:59:59）"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    user=Depends(get_current_user)
+):
+    # 只允许普通用户查自己绑定的设备
+    if user["role"] in ("admin", "service"):
+        raise HTTPException(status_code=403, detail="管理员和客服请使用专用接口")
+    # 校验设备归属
+    async with engine.connect() as conn:
+        row = await conn.execute(
+            text("SELECT id, device_sn FROM devices WHERE id=:id AND user_id=:uid"),
+            {"id": device_id, "uid": user["user_id"]}
+        )
+        device = row.first()
+        if not device:
+            raise HTTPException(status_code=404, detail="设备不存在或未绑定到当前用户")
+        device_sn = device.device_sn
+
+        now = datetime.now(timezone.utc)
+        if not start:
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        if not end:
+            end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+        # 聚合每天的sum
+        where = ["device_id = :device_id", "ts >= :start", "ts <= :end"]
+        params = {"device_id": device_id, "start": start, "end": end}
+        cond = "WHERE " + " AND ".join(where)
+        count_sql = text(f"""
+            SELECT COUNT(*) FROM (
+                SELECT date_trunc('day', ts) AS day
+                FROM history_energy
+                {cond}
+                GROUP BY day
+            ) t
+        """)
+        query_sql = text(f"""
+            SELECT
+                device_id,
+                date_trunc('day', ts) AS day,
+                SUM(charge_wh_total) AS charge_wh_total,
+                SUM(discharge_wh_total) AS discharge_wh_total,
+                SUM(pv_wh_total) AS pv_wh_total
+            FROM history_energy
+            {cond}
+            GROUP BY device_id, day
+            ORDER BY day DESC
+            LIMIT :limit OFFSET :offset
+        """)
+        offset = (page - 1) * page_size
+        total = (await conn.execute(count_sql, params)).scalar_one()
+        rows = (await conn.execute(query_sql, {**params, "limit": page_size, "offset": offset})).mappings().all()
+
+    items = []
+    for r in rows:
+        d = dict(r)
+        d["device_sn"] = device_sn
+        items.append(d)
+    return {"items": items, "page": page, "page_size": page_size, "total": total}
