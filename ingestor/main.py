@@ -116,14 +116,15 @@ history_q: Queue[dict] = Queue(maxsize=QUEUE_MAXSIZE)
 
 HISTORY_UPSERT_SQL = """
 INSERT INTO history_energy (
-  device_id, ts, charge_wh_total, discharge_wh_total, pv_wh_total
+  device_id, ts, charge_wh_total, discharge_wh_total, pv_wh_total, grid_wh_total
 ) VALUES (
-  %(device_id)s, %(ts)s, %(charge_wh_total)s, %(discharge_wh_total)s, %(pv_wh_total)s
+  %(device_id)s, %(ts)s, %(charge_wh_total)s, %(discharge_wh_total)s, %(pv_wh_total)s, %(grid_wh_total)s
 )
 ON CONFLICT (device_id, ts) DO UPDATE SET
   charge_wh_total=EXCLUDED.charge_wh_total,
   discharge_wh_total=EXCLUDED.discharge_wh_total,
-  pv_wh_total=EXCLUDED.pv_wh_total;
+  pv_wh_total=EXCLUDED.pv_wh_total,
+  grid_wh_total=EXCLUDED.grid_wh_total;
 """
 
 def parse_history_device_id(topic: str):
@@ -139,6 +140,7 @@ def normalize_history(sn: str, payload: dict) -> dict:
         "charge_wh_total": int(payload.get("charge_wh_total", 0)),
         "discharge_wh_total": int(payload.get("discharge_wh_total", 0)),
         "pv_wh_total": int(payload.get("pv_wh_total", 0)),
+        "grid_wh_total": int(payload.get("grid_wh_total", 0)),  # 新增
     }
 
 def on_connect(client, userdata, flags, rc, props=None):

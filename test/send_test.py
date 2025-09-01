@@ -43,7 +43,8 @@ def gen_history_payload(device_id: int, ts: str) -> dict:
         "ts": ts,  # ISO格式时间字符串
         "charge_wh_total": rnd(10000, 50000),
         "discharge_wh_total": rnd(10000, 50000),
-        "pv_wh_total": rnd(10000, 50000)
+        "pv_wh_total": rnd(10000, 50000),
+        "grid_wh_total": rnd(-20000, 20000)  # 新增，允许正负
     }
 
 def device_worker(device_id, interval=2, history_interval=10):
