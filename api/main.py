@@ -322,7 +322,6 @@ class HistoryAggListResponse(BaseModel):
 
 @app.get("/api/v1/history", response_model=HistoryAggListResponse, tags=["用户 | User"])
 async def list_history(
-    device_id: int,
     start: Optional[datetime] = Query(None, description="开始时间（ISO8601，默认当天0点）"),
     end: Optional[datetime] = Query(None, description="结束时间（ISO8601，默认当天23:59:59）"),
     page: int = Query(1, ge=1),
@@ -332,33 +331,39 @@ async def list_history(
     # 只允许普通用户查自己绑定的设备
     if user["role"] in ("admin", "service"):
         raise HTTPException(status_code=403, detail="管理员和客服请使用专用接口")
-    # 校验设备归属
+
+    now = datetime.now(timezone.utc)
+    if not start:
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if not end:
+        end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+
     async with engine.connect() as conn:
-        row = await conn.execute(
-            text("SELECT id, device_sn FROM devices WHERE id=:id AND user_id=:uid"),
-            {"id": device_id, "uid": user["user_id"]}
-        )
-        device = row.first()
-        if not device:
-            raise HTTPException(status_code=404, detail="设备不存在或未绑定到当前用户")
-        device_sn = device.device_sn
+        # 查询当前用户绑定的所有设备
+        devices = (await conn.execute(
+            text("SELECT id, device_sn FROM devices WHERE user_id=:uid"),
+            {"uid": user["user_id"]}
+        )).mappings().all()
+        if not devices:
+            return {"items": [], "page": page, "page_size": page_size, "total": 0}
 
-        now = datetime.now(timezone.utc)
-        if not start:
-            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        if not end:
-            end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+        device_ids = [d["id"] for d in devices]
+        device_sn_map = {d["id"]: d["device_sn"] for d in devices}
 
-        # 聚合每天的sum
-        where = ["device_id = :device_id", "ts >= :start", "ts <= :end"]
-        params = {"device_id": device_id, "start": start, "end": end}
+        # 构造 SQL IN 查询
+        placeholders = ",".join([f":id{i}" for i in range(len(device_ids))])
+        params = {f"id{i}": did for i, did in enumerate(device_ids)}
+        params.update({"start": start, "end": end})
+
+        where = [f"device_id IN ({placeholders})", "ts >= :start", "ts <= :end"]
         cond = "WHERE " + " AND ".join(where)
+
         count_sql = text(f"""
             SELECT COUNT(*) FROM (
-                SELECT date_trunc('day', ts) AS day
+                SELECT date_trunc('day', ts) AS day, device_id
                 FROM history_energy
                 {cond}
-                GROUP BY day
+                GROUP BY device_id, day
             ) t
         """)
         query_sql = text(f"""
@@ -374,6 +379,7 @@ async def list_history(
             ORDER BY day DESC
             LIMIT :limit OFFSET :offset
         """)
+
         offset = (page - 1) * page_size
         total = (await conn.execute(count_sql, params)).scalar_one()
         rows = (await conn.execute(query_sql, {**params, "limit": page_size, "offset": offset})).mappings().all()
@@ -381,6 +387,6 @@ async def list_history(
     items = []
     for r in rows:
         d = dict(r)
-        d["device_sn"] = device_sn
+        d["device_sn"] = device_sn_map.get(d["device_id"], "")
         items.append(d)
     return {"items": items, "page": page, "page_size": page_size, "total": total}
