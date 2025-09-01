@@ -309,7 +309,9 @@ from sqlalchemy import func
 class HistoryDataAgg(BaseModel):
     device_id: int
     device_sn: str
-    day: date
+    day: Optional[date] = None
+    hour: Optional[datetime] = None
+    month: Optional[date] = None
     charge_wh_total: Optional[int]
     discharge_wh_total: Optional[int]
     pv_wh_total: Optional[int]
@@ -332,7 +334,7 @@ async def list_history(
         raise HTTPException(status_code=403, detail="管理员和客服请使用专用接口")
 
     now = datetime.now(timezone.utc)
-    group_by = "hour"
+    # 判断聚合粒度
     if not start and not end:
         # 默认查当天每小时
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -340,13 +342,18 @@ async def list_history(
         group_expr = "date_trunc('hour', ts)"
         group_label = "hour"
     else:
-        # 有时间范围则按天聚合
         if not start:
             start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         if not end:
             end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
-        group_expr = "date_trunc('day', ts)"
-        group_label = "day"
+        # 判断是否跨2个月
+        months = (end.year - start.year) * 12 + (end.month - start.month)
+        if months >= 2:
+            group_expr = "date_trunc('month', ts)"
+            group_label = "month"
+        else:
+            group_expr = "date_trunc('day', ts)"
+            group_label = "day"
 
     async with engine.connect() as conn:
         devices = (await conn.execute(
@@ -395,10 +402,18 @@ async def list_history(
     for r in rows:
         d = dict(r)
         d["device_sn"] = device_sn_map.get(d["device_id"], "")
-        # 兼容返回字段
+        # 只保留当前聚合粒度的字段
         if group_label == "hour":
             d["hour"] = d.pop("hour")
-        else:
+            d["day"] = None
+            d["month"] = None
+        elif group_label == "day":
             d["day"] = d.pop("day")
+            d["hour"] = None
+            d["month"] = None
+        elif group_label == "month":
+            d["month"] = d.pop("month")
+            d["hour"] = None
+            d["day"] = None
         items.append(d)
     return {"items": items, "page": page, "page_size": page_size, "total": total}
