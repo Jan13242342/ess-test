@@ -328,18 +328,27 @@ async def list_history(
     page_size: int = Query(20, ge=1, le=200),
     user=Depends(get_current_user)
 ):
-    # 只允许普通用户查自己绑定的设备
     if user["role"] in ("admin", "service"):
         raise HTTPException(status_code=403, detail="管理员和客服请使用专用接口")
 
     now = datetime.now(timezone.utc)
-    if not start:
+    group_by = "hour"
+    if not start and not end:
+        # 默认查当天每小时
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    if not end:
         end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+        group_expr = "date_trunc('hour', ts)"
+        group_label = "hour"
+    else:
+        # 有时间范围则按天聚合
+        if not start:
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        if not end:
+            end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+        group_expr = "date_trunc('day', ts)"
+        group_label = "day"
 
     async with engine.connect() as conn:
-        # 查询当前用户绑定的所有设备
         devices = (await conn.execute(
             text("SELECT id, device_sn FROM devices WHERE user_id=:uid"),
             {"uid": user["user_id"]}
@@ -349,8 +358,6 @@ async def list_history(
 
         device_ids = [d["id"] for d in devices]
         device_sn_map = {d["id"]: d["device_sn"] for d in devices}
-
-        # 构造 SQL IN 查询
         placeholders = ",".join([f":id{i}" for i in range(len(device_ids))])
         params = {f"id{i}": did for i, did in enumerate(device_ids)}
         params.update({"start": start, "end": end})
@@ -360,23 +367,23 @@ async def list_history(
 
         count_sql = text(f"""
             SELECT COUNT(*) FROM (
-                SELECT date_trunc('day', ts) AS day, device_id
+                SELECT {group_expr} AS {group_label}, device_id
                 FROM history_energy
                 {cond}
-                GROUP BY device_id, day
+                GROUP BY device_id, {group_label}
             ) t
         """)
         query_sql = text(f"""
             SELECT
                 device_id,
-                date_trunc('day', ts) AS day,
+                {group_expr} AS {group_label},
                 SUM(charge_wh_total) AS charge_wh_total,
                 SUM(discharge_wh_total) AS discharge_wh_total,
                 SUM(pv_wh_total) AS pv_wh_total
             FROM history_energy
             {cond}
-            GROUP BY device_id, day
-            ORDER BY day DESC
+            GROUP BY device_id, {group_label}
+            ORDER BY {group_label} DESC
             LIMIT :limit OFFSET :offset
         """)
 
@@ -388,5 +395,10 @@ async def list_history(
     for r in rows:
         d = dict(r)
         d["device_sn"] = device_sn_map.get(d["device_id"], "")
+        # 兼容返回字段
+        if group_label == "hour":
+            d["hour"] = d.pop("hour")
+        else:
+            d["day"] = d.pop("day")
         items.append(d)
     return {"items": items, "page": page, "page_size": page_size, "total": total}
