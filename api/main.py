@@ -315,6 +315,7 @@ class HistoryDataAgg(BaseModel):
     charge_wh_total: Optional[int]
     discharge_wh_total: Optional[int]
     pv_wh_total: Optional[int]
+    grid_wh_total: Optional[int]   # 新增
 
 class HistoryAggListResponse(BaseModel):
     items: List[HistoryDataAgg]
@@ -386,7 +387,8 @@ async def list_history(
                 {group_expr} AS {group_label},
                 SUM(charge_wh_total) AS charge_wh_total,
                 SUM(discharge_wh_total) AS discharge_wh_total,
-                SUM(pv_wh_total) AS pv_wh_total
+                SUM(pv_wh_total) AS pv_wh_total,
+                SUM(grid_wh_total) AS grid_wh_total      -- 新增
             FROM history_energy
             {cond}
             GROUP BY device_id, {group_label}

@@ -99,10 +99,12 @@ CREATE TABLE IF NOT EXISTS history_energy (
   charge_wh_total BIGINT, -- 累计充电量 / Total charge (Wh)
   discharge_wh_total BIGINT, -- 累计放电量 / Total discharge (Wh)
   pv_wh_total BIGINT, -- 累计光伏发电量 / Total PV (Wh)
+  grid_wh_total BIGINT, -- 累计电网用电量 / Total grid energy (Wh)   -- 可正可负
   CONSTRAINT pk_history_energy PRIMARY KEY (device_id, ts),
   CONSTRAINT chk_nonneg_charge CHECK (charge_wh_total IS NULL OR charge_wh_total >= 0),
   CONSTRAINT chk_nonneg_discharge CHECK (discharge_wh_total IS NULL OR discharge_wh_total >= 0),
   CONSTRAINT chk_nonneg_pv CHECK (pv_wh_total IS NULL OR pv_wh_total >= 0)
+  -- 不加 grid_wh_total 的非负约束
 ) PARTITION BY RANGE (ts);
 
 -- 自动创建本月分区
