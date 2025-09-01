@@ -167,7 +167,7 @@ class UserLogin(BaseModel):
 JWT_SECRET = os.getenv("JWT_SECRET", "your_jwt_secret_key")
 JWT_ALGORITHM = "HS256"
 
-@app.post("/api/v1/register")
+@app.post("/api/v1/register", tags=["用户 | User"])
 async def register(user: UserRegister):
     async with async_session() as session:
         # 检查用户名或邮箱是否已存在
@@ -176,7 +176,10 @@ async def register(user: UserRegister):
             {"u": user.username, "e": user.email}
         )
         if result.first():
-            raise HTTPException(status_code=400, detail="用户名或邮箱已存在")
+            raise HTTPException(
+                status_code=400,
+                detail={"msg": "用户名或邮箱已存在", "msg_en": "Username or email already exists"}
+            )
         # 密码加密
         pw_hash = bcrypt.hashpw(user.password.encode(), bcrypt.gensalt()).decode()
         await session.execute(
@@ -184,9 +187,9 @@ async def register(user: UserRegister):
             {"u": user.username, "e": user.email, "p": pw_hash}
         )
         await session.commit()
-    return {"msg": "注册成功"}
+    return {"msg": "注册成功", "msg_en": "Register success"}
 
-@app.post("/api/v1/login")
+@app.post("/api/v1/login", tags=["用户 | User"])
 async def login(user: UserLogin):
     async with async_session() as session:
         result = await session.execute(
@@ -195,7 +198,10 @@ async def login(user: UserLogin):
         )
         row = result.first()
         if not row or not bcrypt.checkpw(user.password.encode(), row.password_hash.encode()):
-            raise HTTPException(status_code=401, detail="用户名或密码错误")
+            raise HTTPException(
+                status_code=401,
+                detail={"msg": "用户名或密码错误", "msg_en": "Invalid username or password"}
+            )
         # 生成JWT token
         payload = {
             "user_id": row.id,
@@ -204,9 +210,9 @@ async def login(user: UserLogin):
             "exp": datetime.utcnow() + timedelta(hours=1)
         }
         token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
-    return {"msg": "登录成功", "token": token}
+    return {"msg": "登录成功", "msg_en": "Login success", "token": token}
 
-@app.post("/api/v1/device/bind")
+@app.post("/api/v1/device/bind", tags=["用户 | User"])
 async def bind_device(
     device_sn: str = Body(..., embed=True, description="设备SN"),
     username: str = Body(..., embed=True, description="用户名"),
@@ -219,7 +225,10 @@ async def bind_device(
         )
         user_row = result.first()
         if not user_row:
-            raise HTTPException(status_code=404, detail="用户不存在")
+            raise HTTPException(
+                status_code=404,
+                detail={"msg": "用户不存在", "msg_en": "User not found"}
+            )
         user_id = user_row.id
 
         result = await conn.execute(
@@ -228,16 +237,29 @@ async def bind_device(
         )
         device = result.first()
         if not device:
-            raise HTTPException(status_code=404, detail="设备不存在")
+            raise HTTPException(
+                status_code=404,
+                detail={"msg": "设备不存在", "msg_en": "Device not found"}
+            )
         if device.user_id == user_id:
-            return {"msg": "设备已绑定到该用户", "device_sn": device_sn, "username": username}
+            return {
+                "msg": "设备已绑定到该用户",
+                "msg_en": "Device already bound to this user",
+                "device_sn": device_sn,
+                "username": username
+            }
         await conn.execute(
             text("UPDATE devices SET user_id=:user_id WHERE device_sn=:sn"),
             {"user_id": user_id, "sn": device_sn}
         )
-    return {"msg": "绑定成功", "device_sn": device_sn, "username": username}
+    return {
+        "msg": "绑定成功",
+        "msg_en": "Bind success",
+        "device_sn": device_sn,
+        "username": username
+    }
 
-@app.post("/api/v1/device/unbind")
+@app.post("/api/v1/device/unbind", tags=["用户 | User"])
 async def unbind_device(
     device_sn: str = Body(..., embed=True, description="设备SN"),
     username: str = Body(..., embed=True, description="用户名"),
@@ -250,7 +272,10 @@ async def unbind_device(
         )
         user_row = result.first()
         if not user_row:
-            raise HTTPException(status_code=404, detail="用户不存在")
+            raise HTTPException(
+                status_code=404,
+                detail={"msg": "用户不存在", "msg_en": "User not found"}
+            )
         user_id = user_row.id
 
         result = await conn.execute(
@@ -259,11 +284,22 @@ async def unbind_device(
         )
         device = result.first()
         if not device:
-            raise HTTPException(status_code=404, detail="设备不存在")
+            raise HTTPException(
+                status_code=404,
+                detail={"msg": "设备不存在", "msg_en": "Device not found"}
+            )
         if device.user_id != user_id:
-            raise HTTPException(status_code=403, detail="设备未绑定到该用户，无法解绑")
+            raise HTTPException(
+                status_code=403,
+                detail={"msg": "设备未绑定到该用户，无法解绑", "msg_en": "Device is not bound to this user, cannot unbind"}
+            )
         await conn.execute(
             text("UPDATE devices SET user_id=NULL WHERE device_sn=:sn"),
             {"sn": device_sn}
         )
-    return {"msg": "解绑成功", "device_sn": device_sn, "username": username}
+    return {
+        "msg": "解绑成功",
+        "msg_en": "Unbind success",
+        "device_sn": device_sn,
+        "username": username
+    }
