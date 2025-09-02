@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy import text, select, func
 import bcrypt
 import jwt
+from fastapi.responses import JSONResponse
 
 class Settings(BaseSettings):
     DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://admin:123456@pgbouncer:6432/energy")
@@ -419,3 +420,118 @@ async def list_history(
             d["day"] = None
         items.append(d)
     return {"items": items, "page": page, "page_size": page_size, "total": total}
+
+@app.get("/api/v1/db/metrics", tags=["管理员/客服 | Admin/Service"])
+async def db_metrics(user=Depends(get_current_user)):
+    # 只允许管理员和客服访问
+    if user["role"] not in ("admin", "service"):
+        raise HTTPException(status_code=403, detail="无权限")
+
+    async with engine.connect() as conn:
+        # 当前连接数
+        conn_count = (await conn.execute(text("SELECT count(*) FROM pg_stat_activity"))).scalar_one()
+
+        # 活跃连接详情（非 idle）
+        active_sql = text("""
+            SELECT pid, usename, application_name, client_addr, state, query, now() - query_start AS duration
+            FROM pg_stat_activity
+            WHERE state != 'idle'
+            ORDER BY duration DESC
+            LIMIT 20
+        """)
+        active_rows = (await conn.execute(active_sql)).mappings().all()
+        active_connections = [dict(row) for row in active_rows]
+
+        # 慢查询（运行超过5秒的）
+        slow_sql = text("""
+            SELECT pid, usename, application_name, client_addr, state, query, now() - query_start AS duration
+            FROM pg_stat_activity
+            WHERE state != 'idle' AND now() - query_start > interval '5 seconds'
+            ORDER BY duration DESC
+            LIMIT 20
+        """)
+        slow_rows = (await conn.execute(slow_sql)).mappings().all()
+        slow_queries = [dict(row) for row in slow_rows]
+
+        # 数据库总大小
+        db_size = (await conn.execute(text("SELECT pg_size_pretty(pg_database_size(current_database()))"))).scalar_one()
+
+        # 每个表的大小（前10大表）
+        table_sizes = (await conn.execute(text("""
+            SELECT relname AS table, pg_size_pretty(pg_total_relation_size(relid)) AS size
+            FROM pg_catalog.pg_statio_user_tables
+            ORDER BY pg_total_relation_size(relid) DESC
+            LIMIT 10
+        """))).mappings().all()
+        table_sizes = [dict(row) for row in table_sizes]
+
+        # 缓存命中率
+        hit_rate = (await conn.execute(text("""
+            SELECT
+                ROUND(SUM(blks_hit) / NULLIF(SUM(blks_hit) + SUM(blks_read),0)::numeric, 4) AS hit_rate
+            FROM pg_stat_database
+        """))).scalar_one()
+
+        # 死锁数
+        deadlocks = (await conn.execute(text("""
+            SELECT SUM(deadlocks) FROM pg_stat_database
+        """))).scalar_one()
+
+        # 事务数（当前活跃事务数）
+        tx_count = (await conn.execute(text("""
+            SELECT count(*) FROM pg_stat_activity WHERE state = 'active'
+        """))).scalar_one()
+
+        # 当前等待的查询数
+        waiting_count = (await conn.execute(text("""
+            SELECT count(*) FROM pg_stat_activity WHERE wait_event IS NOT NULL
+        """))).scalar_one()
+
+        # 数据库启动时间
+        start_time = (await conn.execute(text("""
+            SELECT pg_postmaster_start_time()
+        """))).scalar_one()
+
+        # 服务器版本
+        version = (await conn.execute(text("SHOW server_version"))).scalar_one()
+
+        # 最大连接数
+        max_conn = (await conn.execute(text("SHOW max_connections"))).scalar_one()
+
+        # 当前空闲连接数
+        idle_conn = (await conn.execute(
+            text("SELECT count(*) FROM pg_stat_activity WHERE state = 'idle'")
+        )).scalar_one()
+
+        # 历史慢SQL统计（前10条最慢的SQL）
+        stat_sql = text("""
+            SELECT
+                query,
+                calls,
+                total_time,
+                mean_time,
+                max_time
+            FROM pg_stat_statements
+            WHERE calls > 10
+            ORDER BY mean_time DESC
+            LIMIT 10
+        """)
+        stat_rows = (await conn.execute(stat_sql)).mappings().all()
+        slow_sql_history = [dict(row) for row in stat_rows]
+
+    return JSONResponse({
+        "connection_count": conn_count,
+        "active_connections": active_connections,
+        "slow_queries": slow_queries,
+        "db_size": db_size,
+        "table_sizes": table_sizes,
+        "cache_hit_rate": float(hit_rate) if hit_rate is not None else None,
+        "deadlocks": deadlocks,
+        "active_tx_count": tx_count,
+        "waiting_query_count": waiting_count,
+        "start_time": str(start_time),
+        "server_version": version,
+        "max_connections": int(max_conn),
+        "idle_connections": idle_conn,
+        "slow_sql_history": slow_sql_history
+    })

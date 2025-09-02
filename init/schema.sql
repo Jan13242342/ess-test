@@ -161,3 +161,7 @@ INSERT INTO users (username, email, password_hash, role) VALUES
   ('service5', 'service5@example.com', '$2b$12$MQtJ8NIlVywD69WqqldUlOttvE2DKE.k44WFniAzLa6aCjMpzv.G.', 'service')
 ON CONFLICT DO NOTHING;
 
+-- 启用pg_stat_statements扩展
+-- Enable pg_stat_statements extension
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+
