@@ -520,6 +520,7 @@ async def db_metrics(user=Depends(get_current_user)):
             stat_rows = (await conn.execute(stat_sql)).mappings().all()
             slow_sql_history = [dict(row) for row in stat_rows]
         except Exception:
+            await conn.rollback()  # <--- Add this line to reset the transaction state
             # 兼容旧版本（没有 mean_time、max_time 字段）
             stat_sql = text("""
                 SELECT
