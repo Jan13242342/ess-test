@@ -519,6 +519,37 @@ async def db_metrics(user=Depends(get_current_user)):
         stat_rows = (await conn.execute(stat_sql)).mappings().all()
         slow_sql_history = [dict(row) for row in stat_rows]
 
+        # 检查 pg_stat_statements 字段
+        try:
+            stat_sql = text("""
+                SELECT
+                    query,
+                    calls,
+                    total_time,
+                    mean_time,
+                    max_time
+                FROM pg_stat_statements
+                WHERE calls > 10
+                ORDER BY mean_time DESC
+                LIMIT 10
+            """)
+            stat_rows = (await conn.execute(stat_sql)).mappings().all()
+            slow_sql_history = [dict(row) for row in stat_rows]
+        except Exception:
+            # 兼容旧版本（没有 mean_time、max_time 字段）
+            stat_sql = text("""
+                SELECT
+                    query,
+                    calls,
+                    total_time
+                FROM pg_stat_statements
+                WHERE calls > 10
+                ORDER BY total_time DESC
+                LIMIT 10
+            """)
+            stat_rows = (await conn.execute(stat_sql)).mappings().all()
+            slow_sql_history = [dict(row) for row in stat_rows]
+
     return JSONResponse({
         "connection_count": conn_count,
         "active_connections": active_connections,
