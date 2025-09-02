@@ -503,23 +503,7 @@ async def db_metrics(user=Depends(get_current_user)):
             text("SELECT count(*) FROM pg_stat_activity WHERE state = 'idle'")
         )).scalar_one()
 
-        # 历史慢SQL统计（前10条最慢的SQL）
-        stat_sql = text("""
-            SELECT
-                query,
-                calls,
-                total_time,
-                mean_time,
-                max_time
-            FROM pg_stat_statements
-            WHERE calls > 10
-            ORDER BY mean_time DESC
-            LIMIT 10
-        """)
-        stat_rows = (await conn.execute(stat_sql)).mappings().all()
-        slow_sql_history = [dict(row) for row in stat_rows]
-
-        # 检查 pg_stat_statements 字段
+        # 历史慢SQL统计（兼容所有版本）
         try:
             stat_sql = text("""
                 SELECT
