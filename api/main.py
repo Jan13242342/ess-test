@@ -1,6 +1,7 @@
 import os
 from datetime import datetime, timezone, timedelta, date
 from typing import List, Optional
+import decimal
 
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv(".env"), override=True)
@@ -531,7 +532,7 @@ async def db_metrics(user=Depends(get_current_user)):
             await conn.rollback()
             slow_sql_history = []
 
-    return JSONResponse({
+    result = {
         "connection_count": conn_count,
         "active_connections": active_connections,
         "slow_queries": slow_queries,
@@ -546,4 +547,16 @@ async def db_metrics(user=Depends(get_current_user)):
         "max_connections": int(max_conn),
         "idle_connections": idle_conn,
         "slow_sql_history": slow_sql_history
-    })
+    }
+    return JSONResponse(convert_decimal(result))
+
+def convert_decimal(obj):
+    if isinstance(obj, list):
+        return [convert_decimal(i) for i in obj]
+    elif isinstance(obj, dict):
+        return {k: convert_decimal(v) for k, v in obj.items()}
+    elif isinstance(obj, decimal.Decimal):
+        # 你可以根据实际情况转 float 或 int
+        return float(obj)
+    else:
+        return obj
