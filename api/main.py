@@ -435,6 +435,8 @@ async def db_metrics(user=Depends(get_current_user)):
             d = dict(row)
             if "client_addr" in d and d["client_addr"] is not None:
                 d["client_addr"] = str(d["client_addr"])
+            if "duration" in d and d["duration"] is not None:
+                d["duration"] = str(d["duration"])
             return d
 
         # 活跃连接详情（非 idle）
