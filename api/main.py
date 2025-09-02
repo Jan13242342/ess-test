@@ -503,37 +503,25 @@ async def db_metrics(user=Depends(get_current_user)):
             text("SELECT count(*) FROM pg_stat_activity WHERE state = 'idle'")
         )).scalar_one()
 
-        # 历史慢SQL统计（兼容所有版本）
+        # 历史慢SQL统计（PostgreSQL 13+ 字段）
         try:
             stat_sql = text("""
                 SELECT
                     query,
                     calls,
-                    total_time,
-                    mean_time,
-                    max_time
+                    total_exec_time,
+                    mean_exec_time,
+                    max_exec_time
                 FROM pg_stat_statements
                 WHERE calls > 10
-                ORDER BY mean_time DESC
+                ORDER BY mean_exec_time DESC
                 LIMIT 10
             """)
             stat_rows = (await conn.execute(stat_sql)).mappings().all()
             slow_sql_history = [dict(row) for row in stat_rows]
         except Exception:
-            await conn.rollback()  # <--- Add this line to reset the transaction state
-            # 兼容旧版本（没有 mean_time、max_time 字段）
-            stat_sql = text("""
-                SELECT
-                    query,
-                    calls,
-                    total_time
-                FROM pg_stat_statements
-                WHERE calls > 10
-                ORDER BY total_time DESC
-                LIMIT 10
-            """)
-            stat_rows = (await conn.execute(stat_sql)).mappings().all()
-            slow_sql_history = [dict(row) for row in stat_rows]
+            await conn.rollback()
+            slow_sql_history = []
 
     return JSONResponse({
         "connection_count": conn_count,
