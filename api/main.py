@@ -431,6 +431,12 @@ async def db_metrics(user=Depends(get_current_user)):
         # 当前连接数
         conn_count = (await conn.execute(text("SELECT count(*) FROM pg_stat_activity"))).scalar_one()
 
+        def safe_dict(row):
+            d = dict(row)
+            if "client_addr" in d and d["client_addr"] is not None:
+                d["client_addr"] = str(d["client_addr"])
+            return d
+
         # 活跃连接详情（非 idle）
         active_sql = text("""
             SELECT pid, usename, application_name, client_addr, state, query, now() - query_start AS duration
@@ -440,7 +446,7 @@ async def db_metrics(user=Depends(get_current_user)):
             LIMIT 20
         """)
         active_rows = (await conn.execute(active_sql)).mappings().all()
-        active_connections = [dict(row) for row in active_rows]
+        active_connections = [safe_dict(row) for row in active_rows]
 
         # 慢查询（运行超过5秒的）
         slow_sql = text("""
@@ -451,7 +457,7 @@ async def db_metrics(user=Depends(get_current_user)):
             LIMIT 20
         """)
         slow_rows = (await conn.execute(slow_sql)).mappings().all()
-        slow_queries = [dict(row) for row in slow_rows]
+        slow_queries = [safe_dict(row) for row in slow_rows]
 
         # 数据库总大小
         db_size = (await conn.execute(text("SELECT pg_size_pretty(pg_database_size(current_database()))"))).scalar_one()
