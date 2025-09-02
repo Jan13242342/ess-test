@@ -90,11 +90,21 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_
 
 # ================= 用户专用接口 / User APIs =================
 
-@app.get("/api/v1/realtime", response_model=ListResponse, tags=["用户 | User"])
+@app.get(
+    "/api/v1/realtime",
+    response_model=ListResponse,
+    tags=["用户 | User"],
+    summary="获取用户实时数据 | Get User Realtime Data",
+    description="""
+获取当前用户所有设备的最新实时数据，支持分页。仅普通用户可用。
+
+Get the latest realtime data for all devices of the current user, supports pagination. Only available for normal users.
+"""
+)
 async def list_realtime(
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=200),
-    fresh_secs: Optional[int] = None,
+    page: int = Query(1, ge=1, description="页码 | Page number"),
+    page_size: int = Query(20, ge=1, le=200, description="每页数量 | Page size"),
+    fresh_secs: Optional[int] = Query(None, description="判定在线的秒数，默认60秒 | Seconds to judge online, default 60s"),
     user=Depends(get_current_user)
 ):
     # 只允许普通用户访问，管理员和客服不用这个接口
@@ -130,7 +140,17 @@ async def list_realtime(
 
 # ================= 管理员/客服专用接口 / Admin & Service APIs =================
 
-@app.get("/api/v1/realtime/by_sn/{device_sn}", response_model=RealtimeData, tags=["管理员/客服 | Admin/Service"])
+@app.get(
+    "/api/v1/realtime/by_sn/{device_sn}",
+    response_model=RealtimeData,
+    tags=["管理员/客服 | Admin/Service"],
+    summary="根据设备SN获取实时数据 | Get Realtime Data by Device SN",
+    description="""
+管理员或客服可通过设备SN查询该设备的最新实时数据。
+
+Admin or service staff can query the latest realtime data of a device by its SN.
+"""
+)
 async def get_realtime_by_sn(
     device_sn: str,
     user=Depends(get_current_user)
@@ -169,7 +189,16 @@ class UserLogin(BaseModel):
 JWT_SECRET = os.getenv("JWT_SECRET", "your_jwt_secret_key")
 JWT_ALGORITHM = "HS256"
 
-@app.post("/api/v1/register", tags=["用户 | User"])
+@app.post(
+    "/api/v1/register",
+    tags=["用户 | User"],
+    summary="用户注册 | User Register",
+    description="""
+注册新用户，需提供用户名、邮箱和密码。
+
+Register a new user. Username, email and password are required.
+"""
+)
 async def register(user: UserRegister):
     async with async_session() as session:
         # 检查用户名或邮箱是否已存在
@@ -191,7 +220,16 @@ async def register(user: UserRegister):
         await session.commit()
     return {"msg": "注册成功", "msg_en": "Register success"}
 
-@app.post("/api/v1/login", tags=["用户 | User"])
+@app.post(
+    "/api/v1/login",
+    tags=["用户 | User"],
+    summary="用户登录 | User Login",
+    description="""
+用户登录，成功后返回JWT令牌。
+
+User login, returns JWT token if successful.
+"""
+)
 async def login(user: UserLogin):
     async with async_session() as session:
         result = await session.execute(
@@ -214,10 +252,19 @@ async def login(user: UserLogin):
         token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
     return {"msg": "登录成功", "msg_en": "Login success", "token": token}
 
-@app.post("/api/v1/device/bind", tags=["用户 | User"])
+@app.post(
+    "/api/v1/device/bind",
+    tags=["用户 | User"],
+    summary="绑定设备 | Bind Device",
+    description="""
+将设备SN绑定到指定用户名下。需登录后操作。
+
+Bind a device SN to the specified username. Requires login.
+"""
+)
 async def bind_device(
-    device_sn: str = Body(..., embed=True, description="设备SN"),
-    username: str = Body(..., embed=True, description="用户名"),
+    device_sn: str = Body(..., embed=True, description="设备SN | Device SN"),
+    username: str = Body(..., embed=True, description="用户名 | Username"),
     user=Depends(get_current_user)
 ):
     async with engine.begin() as conn:
@@ -261,10 +308,19 @@ async def bind_device(
         "username": username
     }
 
-@app.post("/api/v1/device/unbind", tags=["用户 | User"])
+@app.post(
+    "/api/v1/device/unbind",
+    tags=["用户 | User"],
+    summary="解绑设备 | Unbind Device",
+    description="""
+将设备SN从指定用户名下解绑。需登录后操作。
+
+Unbind a device SN from the specified username. Requires login.
+"""
+)
 async def unbind_device(
-    device_sn: str = Body(..., embed=True, description="设备SN"),
-    username: str = Body(..., embed=True, description="用户名"),
+    device_sn: str = Body(..., embed=True, description="设备SN | Device SN"),
+    username: str = Body(..., embed=True, description="用户名 | Username"),
     user=Depends(get_current_user)
 ):
     async with engine.begin() as conn:
@@ -325,12 +381,22 @@ class HistoryAggListResponse(BaseModel):
     page_size: int
     total: int
 
-@app.get("/api/v1/history", response_model=HistoryAggListResponse, tags=["用户 | User"])
+@app.get(
+    "/api/v1/history",
+    response_model=HistoryAggListResponse,
+    tags=["用户 | User"],
+    summary="历史能耗聚合数据 | Aggregated History Energy Data",
+    description="""
+获取当前用户设备的历史能耗聚合数据，支持按小时、天、月聚合，支持时间范围筛选和分页。
+
+Get aggregated historical energy data for user's devices, supports aggregation by hour, day, or month, with time range filter and pagination.
+"""
+)
 async def list_history(
-    start: Optional[datetime] = Query(None, description="开始时间（ISO8601，默认当天0点）"),
-    end: Optional[datetime] = Query(None, description="结束时间（ISO8601，默认当天23:59:59）"),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=200),
+    start: Optional[datetime] = Query(None, description="开始时间（ISO8601，默认当天0点）| Start time (ISO8601, default today 00:00)"),
+    end: Optional[datetime] = Query(None, description="结束时间（ISO8601，默认当天23:59:59）| End time (ISO8601, default today 23:59:59)"),
+    page: int = Query(1, ge=1, description="页码 | Page number"),
+    page_size: int = Query(20, ge=1, le=200, description="每页数量 | Page size"),
     user=Depends(get_current_user)
 ):
     if user["role"] in ("admin", "service"):
@@ -422,7 +488,16 @@ async def list_history(
         items.append(d)
     return {"items": items, "page": page, "page_size": page_size, "total": total}
 
-@app.get("/api/v1/db/metrics", tags=["管理员/客服 | Admin/Service"])
+@app.get(
+    "/api/v1/db/metrics",
+    tags=["管理员/客服 | Admin/Service"],
+    summary="数据库健康与性能指标 | Database Health & Performance Metrics",
+    description="""
+仅管理员和客服可用。返回数据库连接数、活跃连接、慢查询、缓存命中率、死锁数、慢SQL历史等多项数据库健康与性能指标。
+
+Admin and service only. Returns database connection count, active connections, slow queries, cache hit rate, deadlocks, slow SQL history and other health/performance metrics.
+"""
+)
 async def db_metrics(user=Depends(get_current_user)):
     # 只允许管理员和客服访问
     if user["role"] not in ("admin", "service"):
