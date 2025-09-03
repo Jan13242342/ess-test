@@ -635,3 +635,32 @@ def convert_decimal(obj):
         return float(obj)
     else:
         return obj
+
+@app.get(
+    "/api/v1/getinfo",
+    tags=["用户 | User"],
+    summary="获取当前用户信息 | Get Current User Info",
+    description="""
+返回当前登录用户的基本信息，包括用户名、邮箱、角色（权限）等。
+
+Return basic info of the current logged-in user, including username, email, role (permission), etc.
+"""
+)
+async def get_info(user=Depends(get_current_user)):
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            text("SELECT id, username, email, role, created_at FROM users WHERE id=:uid"),
+            {"uid": user["user_id"]}
+        )
+        row = result.first()
+        if not row:
+            raise HTTPException(status_code=404, detail="用户不存在 | User not found")
+        info = dict(row)
+        # 可以根据需要添加更多字段
+        return {
+            "user_id": info["id"],
+            "username": info["username"],
+            "email": info["email"],
+            "role": info["role"],
+            "created_at": info["created_at"]
+        }
