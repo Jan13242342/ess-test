@@ -655,7 +655,7 @@ async def get_info(user=Depends(get_current_user)):
         row = result.first()
         if not row:
             raise HTTPException(status_code=404, detail="用户不存在 | User not found")
-        info = dict(row)
+        info = row._mapping  # 关键修改
         return {
             "user_id": info["id"],
             "username": info["username"],
