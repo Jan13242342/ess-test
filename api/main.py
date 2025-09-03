@@ -661,3 +661,16 @@ async def get_info(user=Depends(get_current_user)):
             "email": info["email"],
             "role": info["role"]
         }
+
+@app.post(
+    "/api/v1/logout",
+    tags=["用户 | User"],
+    summary="用户登出 | User Logout",
+    description="""
+前端调用后应删除本地JWT令牌，后端不做实际操作，仅返回成功。
+
+Frontend should delete the local JWT token after calling this API. Backend does not perform any operation, just returns success.
+"""
+)
+async def logout():
+    return {"msg": "登出成功", "msg_en": "Logout success"}
