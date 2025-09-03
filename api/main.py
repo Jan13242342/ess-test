@@ -649,15 +649,14 @@ Return basic info of the current logged-in user, including username, email, role
 async def get_info(user=Depends(get_current_user)):
     async with engine.connect() as conn:
         result = await conn.execute(
-            text("SELECT id, username, email, role FROM users WHERE id=:uid"),
+            text("SELECT username, email, role FROM users WHERE id=:uid"),
             {"uid": user["user_id"]}
         )
         row = result.first()
         if not row:
             raise HTTPException(status_code=404, detail="用户不存在 | User not found")
-        info = row._mapping  # 关键修改
+        info = row._mapping
         return {
-            "user_id": info["id"],
             "username": info["username"],
             "email": info["email"],
             "role": info["role"]
