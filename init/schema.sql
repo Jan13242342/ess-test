@@ -177,3 +177,11 @@ CREATE TABLE IF NOT EXISTS email_codes (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now() -- 创建时间
 );
 
+-- 清理过期或已使用的邮箱验证码
+-- Clean up expired or used email verification codes
+SELECT cron.schedule(
+  'clean_expired_email_codes',
+  '0 3 * * *',
+  $$DELETE FROM email_codes WHERE expires_at < now() OR used = TRUE$$
+);
+
