@@ -34,7 +34,7 @@ services:
       - ./api:/app
       - ./log_config.yaml:/app/log_config.yaml:ro
     working_dir: /app
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload --log-config /app/log_config.yaml
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --log-config /app/log_config.yaml
     depends_on:
       postgres:
         condition: service_healthy
