@@ -16,6 +16,9 @@ from sqlalchemy import text, select, func
 import bcrypt
 import jwt
 from fastapi.responses import JSONResponse
+import aiosmtplib
+from email.message import EmailMessage
+from random import randint
 
 logging.basicConfig(
     level=logging.INFO,
@@ -681,3 +684,50 @@ Frontend should delete the local JWT token after calling this API. Backend does 
 )
 async def logout():
     return {"msg": "登出成功", "msg_en": "Logout success"}
+
+class EmailCodeRequest(BaseModel):
+    email: EmailStr
+
+@app.post(
+    "/api/v1/send_email_code_register",
+    tags=["用户 | User"],
+    summary="发送注册验证码（雅虎邮箱）| Send Register Code (Yahoo Mail)",
+    description="""
+向指定邮箱发送注册验证码，验证码5分钟内有效。使用雅虎邮箱SMTP发送。
+
+Send a registration verification code to the specified email, valid for 5 minutes. Uses Yahoo Mail SMTP.
+"""
+)
+async def send_email_code_register(data: EmailCodeRequest):
+    code = f"{randint(100000, 999999)}"
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+    # 写入数据库
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("""
+                INSERT INTO email_codes (email, code, purpose, expires_at)
+                VALUES (:email, :code, :purpose, :expires_at)
+            """),
+            {
+                "email": data.email,
+                "code": code,
+                "purpose": "register",
+                "expires_at": expires_at
+            }
+        )
+    # 发送邮件
+    msg = EmailMessage()
+    msg["Subject"] = "【ESS系统】注册验证码"
+    msg["From"] = "codetest233233@yahoo.com"  # 替换为你的雅虎邮箱
+    msg["To"] = data.email
+    msg.set_content(f"您的注册验证码是：{code}，5分钟内有效。\n\nYour registration code is: {code}, valid for 5 minutes.")
+
+    await aiosmtplib.send(
+        msg,
+        hostname="smtp.mail.yahoo.com",
+        port=465,
+        username="codetest233233@yahoo.com",      # 替换为你的雅虎邮箱
+        password="zj19871118",    # 替换为你的密码或应用专用密码
+        use_tls=True,
+    )
+    return {"msg": "验证码已发送", "msg_en": "Verification code sent"}

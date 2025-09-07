@@ -165,3 +165,15 @@ ON CONFLICT DO NOTHING;
 -- Enable pg_stat_statements extension
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 
+-- 邮箱验证码表：存储邮箱验证码信息
+-- Email verification codes table: stores email verification code information
+CREATE TABLE IF NOT EXISTS email_codes (
+  id BIGSERIAL PRIMARY KEY,           -- 主键
+  email TEXT NOT NULL,                -- 邮箱
+  code TEXT NOT NULL,                 -- 验证码
+  purpose TEXT NOT NULL,              -- 用途（如 register, reset_password 等）
+  expires_at TIMESTAMPTZ NOT NULL,    -- 过期时间
+  used BOOLEAN NOT NULL DEFAULT FALSE, -- 是否已用
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now() -- 创建时间
+);
+
