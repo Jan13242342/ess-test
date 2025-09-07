@@ -2,7 +2,7 @@ import os
 from datetime import datetime, timezone, timedelta, date
 from typing import List, Optional
 import decimal
-import logging
+
 
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv(".env"), override=True)
@@ -20,11 +20,7 @@ import aiosmtplib
 from email.message import EmailMessage
 from random import randint
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
-)
+
 
 class Settings(BaseSettings):
     DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://admin:123456@pgbouncer:6432/energy")
