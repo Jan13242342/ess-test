@@ -714,6 +714,17 @@ For development/testing: generate a registration code for the given email, valid
 """
 )
 async def send_email_code_register(data: EmailCodeRequest):
+    # 检查邮箱是否已注册
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            text("SELECT 1 FROM users WHERE email=:email"),
+            {"email": data.email}
+        )
+        if result.first():
+            raise HTTPException(
+                status_code=400,
+                detail={"msg": "该邮箱已注册", "msg_en": "This email is already registered"}
+            )
     code = f"{randint(100000, 999999)}"
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
     # 写入数据库
