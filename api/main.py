@@ -191,6 +191,7 @@ class UserRegister(BaseModel):
     username: str
     email: EmailStr
     password: str
+    code: str  # 新增验证码字段
 
 class UserLogin(BaseModel):
     username: str
@@ -204,13 +205,31 @@ JWT_ALGORITHM = "HS256"
     tags=["用户 | User"],
     summary="用户注册 | User Register",
     description="""
-注册新用户，需提供用户名、邮箱和密码。
+注册新用户，需提供用户名、邮箱、密码和验证码。
 
-Register a new user. Username, email and password are required.
+Register a new user. Username, email, password and verification code are required.
 """
 )
 async def register(user: UserRegister):
     async with async_session() as session:
+        # 校验验证码
+        result = await session.execute(
+            text("""
+                SELECT id FROM email_codes
+                WHERE email=:e AND code=:c AND purpose='register'
+                  AND expires_at > now() AND used=FALSE
+                ORDER BY expires_at DESC LIMIT 1
+            """),
+            {"e": user.email, "c": user.code}
+        )
+        code_row = result.first()
+        if not code_row:
+            raise HTTPException(status_code=400, detail="验证码错误或已过期")
+        # 标记验证码已用
+        await session.execute(
+            text("UPDATE email_codes SET used=TRUE WHERE id=:id"),
+            {"id": code_row.id}
+        )
         # 检查用户名或邮箱是否已存在
         result = await session.execute(
             text("SELECT 1 FROM users WHERE username=:u OR email=:e"),
