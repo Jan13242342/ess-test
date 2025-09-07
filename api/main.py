@@ -691,11 +691,11 @@ class EmailCodeRequest(BaseModel):
 @app.post(
     "/api/v1/send_email_code_register",
     tags=["用户 | User"],
-    summary="发送注册验证码（雅虎邮箱）| Send Register Code (Yahoo Mail)",
+    summary="【测试用】发送注册验证码（直接返回code）| [Test] Send Register Code (Return Code)",
     description="""
-向指定邮箱发送注册验证码，验证码5分钟内有效。使用雅虎邮箱SMTP发送。
+开发测试用：向指定邮箱生成注册验证码，验证码5分钟内有效，直接返回验证码（生产环境请勿返回code）。
 
-Send a registration verification code to the specified email, valid for 5 minutes. Uses Yahoo Mail SMTP.
+For development/testing: generate a registration code for the given email, valid for 5 minutes, and return the code directly (do NOT do this in production).
 """
 )
 async def send_email_code_register(data: EmailCodeRequest):
@@ -715,19 +715,9 @@ async def send_email_code_register(data: EmailCodeRequest):
                 "expires_at": expires_at
             }
         )
-    # 发送邮件
-    msg = EmailMessage()
-    msg["Subject"] = "【ESS系统】注册验证码"
-    msg["From"] = "codetest233233@yahoo.com"  # 替换为你的雅虎邮箱
-    msg["To"] = data.email
-    msg.set_content(f"您的注册验证码是：{code}，5分钟内有效。\n\nYour registration code is: {code}, valid for 5 minutes.")
-
-    await aiosmtplib.send(
-        msg,
-        hostname="smtp.mail.yahoo.com",
-        port=465,
-        username="codetest233233@yahoo.com",      # 替换为你的雅虎邮箱
-        password="zj19871118",    # 替换为你的密码或应用专用密码
-        use_tls=True,
-    )
-    return {"msg": "验证码已发送", "msg_en": "Verification code sent"}
+    # 直接返回验证码（仅测试用）
+    return {
+        "msg": "验证码已生成（测试环境直接返回）",
+        "msg_en": "Verification code generated (returned for testing)",
+        "code": code
+    }
