@@ -224,7 +224,7 @@ async def register(user: UserRegister):
         )
         code_row = result.first()
         if not code_row:
-            raise HTTPException(status_code=400, detail="验证码错误或已过期")
+            raise HTTPException(status_code=400, detail={"msg": "验证码错误或已过期", "msg_en": "Verification code error or expired"})
         # 标记验证码已用
         await session.execute(
             text("UPDATE email_codes SET used=TRUE WHERE id=:id"),
