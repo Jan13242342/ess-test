@@ -9,7 +9,7 @@ load_dotenv(find_dotenv(".env"), override=True)
 
 from fastapi import FastAPI, Query, HTTPException, Depends, Body
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from pydantic_settings import BaseSettings
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy import text, select, func
@@ -757,7 +757,7 @@ async def send_email_code_register(data: EmailCodeRequest):
 from typing import Any
 
 class AlarmItem(BaseModel):
-    id: int
+    alarm_id: int = Field(..., alias="alarm_id")
     device_id: Optional[int]
     alarm_type: str
     level: str
@@ -768,6 +768,9 @@ class AlarmItem(BaseModel):
     confirmed_at: Optional[datetime]
     cleared_at: Optional[datetime]
     cleared_by: Optional[str]
+
+    class Config:
+        allow_population_by_field_name = True
 
 class AlarmListResponse(BaseModel):
     items: List[AlarmItem]
