@@ -775,70 +775,6 @@ class AlarmListResponse(BaseModel):
     page_size: int
     total: int
 
-@app.get(
-    "/api/v1/alarms",
-    response_model=AlarmListResponse,
-    tags=["报警 | Alarm"],
-    summary="查询报警信息 | Query Alarm List",
-    description="""
-普通用户只能查询自己设备的报警，管理员/客服可按设备、状态、级别等筛选。
-
-Normal users can only query alarms of their own devices. Admin/service can filter by device, status, level, etc.
-"""
-)
-async def list_alarms(
-    page: int = Query(1, ge=1, description="页码 | Page number"),
-    page_size: int = Query(20, ge=1, le=200, description="每页数量 | Page size"),
-    status: Optional[str] = Query(None, description="报警状态（active/confirmed/cleared）| Alarm status"),
-    device_id: Optional[int] = Query(None, description="设备ID | Device ID"),
-    level: Optional[str] = Query(None, description="报警级别（info/warning/critical/fatal）| Alarm level"),
-    user=Depends(get_current_user)
-):
-    where = []
-    params = {}
-    # 权限控制
-    if user["role"] in ("admin", "service"):
-        # 管理员/客服可按参数筛选
-        if device_id:
-            where.append("device_id = :device_id")
-            params["device_id"] = device_id
-    else:
-        # 普通用户只能查自己设备
-        async with engine.connect() as conn:
-            devices = (await conn.execute(
-                text("SELECT id FROM devices WHERE user_id=:uid"),
-                {"uid": user["user_id"]}
-            )).scalars().all()
-        if not devices:
-            return {"items": [], "page": page, "page_size": page_size, "total": 0}
-        placeholders = ",".join([f":id{i}" for i in range(len(devices))])
-        for i, did in enumerate(devices):
-            params[f"id{i}"] = did
-        where.append(f"device_id IN ({placeholders})")
-    if status:
-        where.append("status = :status")
-        params["status"] = status
-    if level:
-        where.append("level = :level")
-        params["level"] = level
-    cond = "WHERE " + " AND ".join(where) if where else ""
-    offset = (page - 1) * page_size
-
-    async with engine.connect() as conn:
-        count_sql = text(f"SELECT COUNT(*) FROM alarms {cond}")
-        total = (await conn.execute(count_sql, params)).scalar_one()
-        query_sql = text(f"""
-            SELECT *
-            FROM alarms
-            {cond}
-            ORDER BY created_at DESC
-            LIMIT :limit OFFSET :offset
-        """)
-        rows = (await conn.execute(query_sql, {**params, "limit": page_size, "offset": offset})).mappings().all()
-        items = [dict(row) for row in rows]
-
-    return {"items": items, "page": page, "page_size": page_size, "total": total}
-
 # 用户只能查自己设备报警
 @app.get(
     "/api/v1/alarms/user",
@@ -934,3 +870,70 @@ async def list_all_alarms(
         rows = (await conn.execute(query_sql, {**params, "limit": page_size, "offset": offset})).mappings().all()
         items = [dict(row) for row in rows]
     return {"items": items, "page": page, "page_size": page_size, "total": total}
+
+class AlarmActionRequest(BaseModel):
+    alarm_id: int
+
+@app.post(
+    "/api/v1/alarms/admin/confirm",
+    tags=["管理员/客服 | Admin/Service"],
+    summary="确认报警 | Confirm Alarm",
+    description="管理员/客服确认报警，将status设为confirmed并记录确认时间。",
+)
+async def confirm_alarm(
+    data: AlarmActionRequest,
+    user=Depends(get_current_user)
+):
+    if user["role"] not in ("admin", "service"):
+        raise HTTPException(status_code=403, detail="无权限")
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("SELECT status FROM alarms WHERE id=:id"),
+            {"id": data.alarm_id}
+        )
+        row = result.first()
+        if not row:
+            raise HTTPException(status_code=404, detail="报警不存在")
+        if row.status == "confirmed":
+            return {"msg": "报警已确认", "msg_en": "Alarm already confirmed"}
+        await conn.execute(
+            text("""
+                UPDATE alarms
+                SET status='confirmed', confirmed_at=now()
+                WHERE id=:id
+            """),
+            {"id": data.alarm_id}
+        )
+    return {"msg": "报警已确认", "msg_en": "Alarm confirmed"}
+
+@app.post(
+    "/api/v1/alarms/admin/clear",
+    tags=["管理员/客服 | Admin/Service"],
+    summary="清除报警 | Clear Alarm",
+    description="管理员/客服清除报警，将status设为cleared并记录清除时间和操作人。",
+)
+async def clear_alarm(
+    data: AlarmActionRequest,
+    user=Depends(get_current_user)
+):
+    if user["role"] not in ("admin", "service"):
+        raise HTTPException(status_code=403, detail="无权限")
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("SELECT status FROM alarms WHERE id=:id"),
+            {"id": data.alarm_id}
+        )
+        row = result.first()
+        if not row:
+            raise HTTPException(status_code=404, detail="报警不存在")
+        if row.status == "cleared":
+            return {"msg": "报警已清除", "msg_en": "Alarm already cleared"}
+        await conn.execute(
+            text("""
+                UPDATE alarms
+                SET status='cleared', cleared_at=now(), cleared_by=:by
+                WHERE id=:id
+            """),
+            {"id": data.alarm_id, "by": user["username"]}
+        )
+    return {"msg": "报警已清除", "msg_en": "Alarm cleared"}
