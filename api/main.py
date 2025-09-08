@@ -835,13 +835,13 @@ async def list_my_alarms(
     response_model=AlarmListResponse,
     tags=["管理员/客服 | Admin/Service"],
     summary="报警管理查询 | Query All Alarms (Admin/Service)",
-    description="管理员/客服可按设备、状态、级别等筛选报警。"
+    description="管理员/客服可按设备序列号、状态、级别等筛选报警。"
 )
 async def list_all_alarms(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     status: Optional[str] = Query(None),
-    device_id: Optional[int] = Query(None),
+    device_sn: Optional[str] = Query(None),
     level: Optional[str] = Query(None),
     user=Depends(get_current_user)
 ):
@@ -849,26 +849,29 @@ async def list_all_alarms(
         raise HTTPException(status_code=403, detail="无权限")
     where = []
     params = {}
-    if device_id:
-        where.append("device_id = :device_id")
-        params["device_id"] = device_id
+    join_sql = ""
+    if device_sn:
+        join_sql = "JOIN devices d ON alarms.device_id = d.id"
+        where.append("d.device_sn = :device_sn")
+        params["device_sn"] = device_sn
     if status:
-        where.append("status = :status")
+        where.append("alarms.status = :status")
         params["status"] = status
     if level:
-        where.append("level = :level")
+        where.append("alarms.level = :level")
         params["level"] = level
     cond = "WHERE " + " AND ".join(where) if where else ""
     offset = (page - 1) * page_size
 
     async with engine.connect() as conn:
-        count_sql = text(f"SELECT COUNT(*) FROM alarms {cond}")
+        count_sql = text(f"SELECT COUNT(*) FROM alarms {join_sql} {cond}")
         total = (await conn.execute(count_sql, params)).scalar_one()
         query_sql = text(f"""
-            SELECT *
+            SELECT alarms.*, d.device_sn
             FROM alarms
+            {join_sql}
             {cond}
-            ORDER BY created_at DESC
+            ORDER BY alarms.created_at DESC
             LIMIT :limit OFFSET :offset
         """)
         rows = (await conn.execute(query_sql, {**params, "limit": page_size, "offset": offset})).mappings().all()
