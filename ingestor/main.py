@@ -143,12 +143,32 @@ def normalize_history(sn: str, payload: dict) -> dict:
         "grid_wh_total": int(payload.get("grid_wh_total", 0)),  # 新增
     }
 
+# 新增报警topic和队列
+ALARM_TOPIC = os.getenv("MQTT_ALARM_TOPIC", "$share/ess-ingestor/devices/+/alarm")
+alarm_q: Queue[dict] = Queue(maxsize=QUEUE_MAXSIZE)
+
+ALARM_INSERT_SQL = """
+INSERT INTO alarms (
+  device_id, alarm_type, level, message, extra, status, created_at
+) VALUES (
+  %(device_id)s, %(alarm_type)s, %(level)s, %(message)s, %(extra)s, %(status)s, now()
+)
+"""
+
+def parse_alarm_device_id(topic: str):
+    parts = topic.split("/")
+    if len(parts) >= 3 and parts[0]=="devices" and parts[2]=="alarm":
+        return parts[1]
+    return None
+
 def on_connect(client, userdata, flags, rc, props=None):
     if rc == 0:
         log(f"[MQTT] connected. subscribing {MQTT_TOPIC} qos={MQTT_QOS}")
         client.subscribe(MQTT_TOPIC, qos=MQTT_QOS)
         log(f"[MQTT] subscribing {HISTORY_TOPIC} qos={MQTT_QOS}")
         client.subscribe(HISTORY_TOPIC, qos=MQTT_QOS)
+        log(f"[MQTT] subscribing {ALARM_TOPIC} qos={MQTT_QOS}")
+        client.subscribe(ALARM_TOPIC, qos=MQTT_QOS)
     else:
         log(f"[MQTT] connect failed rc={rc}")
 
@@ -166,6 +186,19 @@ def on_message(client, userdata, msg):
             payload = json.loads(msg.payload.decode("utf-8"))
             rec = normalize_history(sn, payload)
             history_q.put(rec, block=False)
+        elif msg.topic.endswith("/alarm"):
+            sn = parse_alarm_device_id(msg.topic)
+            if not sn: return
+            payload = json.loads(msg.payload.decode("utf-8"))
+            alarm = {
+                "device_id": int(sn),
+                "alarm_type": payload.get("alarm_type", "unknown"),
+                "level": payload.get("level", "info"),
+                "message": payload.get("message", ""),
+                "extra": json.dumps(payload.get("extra", {})),
+                "status": payload.get("status", "active"),
+            }
+            alarm_q.put(alarm, block=False)
     except Exception as e:
         log("[on_message] error:", e)
 
@@ -251,9 +284,40 @@ def history_flusher():
             log("[history_flusher] fatal error, will retry in 5s:", e)
             time.sleep(5)
 
+def alarm_flusher():
+    while not stop_event.is_set():
+        try:
+            conn = psycopg2.connect(PG_DSN)
+            conn.autocommit = False
+            try:
+                while not stop_event.is_set():
+                    batch = []
+                    deadline = time.time() + FLUSH_MS/1000.0
+                    while len(batch) < BATCH_SIZE and time.time() < deadline:
+                        try:
+                            batch.append(alarm_q.get(timeout=0.05))
+                        except Empty:
+                            pass
+                    if batch:
+                        try:
+                            with conn.cursor() as cur:
+                                # 可选：ensure_devices_exist(cur, batch)
+                                execute_batch(cur, ALARM_INSERT_SQL, batch, page_size=1000)
+                            conn.commit()
+                            log(f"[DB] insert alarm {len(batch)} rows")
+                        except Exception as e:
+                            log("[alarm_flusher] DB error:", e)
+                            conn.rollback()
+            finally:
+                conn.close()
+        except Exception as e:
+            log("[alarm_flusher] fatal error, will retry in 5s:", e)
+            time.sleep(5)
+
 def main():
     t = Thread(target=flusher, daemon=True); t.start()
     ht = Thread(target=history_flusher, daemon=True); ht.start()
+    at = Thread(target=alarm_flusher, daemon=True); at.start()
     try:
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     except AttributeError:
@@ -268,7 +332,7 @@ def main():
 
     try:
         while not stop_event.is_set():
-            if not t.is_alive() or not ht.is_alive():
+            if not t.is_alive() or not ht.is_alive() or not at.is_alive():
                 log("[main] flusher thread died, shutting down...")
                 stop_event.set()
             time.sleep(0.5)

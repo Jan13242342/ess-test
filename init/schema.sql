@@ -185,3 +185,25 @@ SELECT cron.schedule(
   $$DELETE FROM email_codes WHERE expires_at < now() OR used = TRUE$$
 );
 
+-- 报警表：存储所有报警信息（含历史）
+-- Alarm table: stores all alarm information (including history)
+CREATE TABLE IF NOT EXISTS alarms (
+  id BIGSERIAL PRIMARY KEY,                -- 报警ID / Alarm ID
+  device_id BIGINT REFERENCES devices(id) ON DELETE SET NULL, -- 关联设备ID / Related device ID
+  alarm_type TEXT NOT NULL,                -- 报警类型（如 overvoltage, offline, system, business 等）/ Alarm type
+  level TEXT NOT NULL DEFAULT 'info',      -- 报警级别（info, warning, critical, fatal）/ Alarm level
+  message TEXT NOT NULL,                   -- 报警内容 / Alarm message
+  extra JSONB,                             -- 额外信息（可选，结构化扩展）/ Extra info (optional, for structured extension)
+  status TEXT NOT NULL DEFAULT 'active',   -- 状态（active, confirmed, cleared）/ Status (active, confirmed, cleared)
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(), -- 报警时间 / Alarm time
+  confirmed_at TIMESTAMPTZ,                -- 确认时间 / Confirmed time
+  cleared_at TIMESTAMPTZ,                  -- 清除时间 / Cleared time
+  cleared_by TEXT                          -- 清除人（system/用户名）/ Cleared by (system/username)
+);
+
+-- 索引建议
+CREATE INDEX IF NOT EXISTS ix_alarms_device_id ON alarms(device_id);
+CREATE INDEX IF NOT EXISTS ix_alarms_level ON alarms(level);
+CREATE INDEX IF NOT EXISTS ix_alarms_status ON alarms(status);
+CREATE INDEX IF NOT EXISTS ix_alarms_created_at ON alarms(created_at DESC);
+

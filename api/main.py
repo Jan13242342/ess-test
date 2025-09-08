@@ -1,6 +1,6 @@
 import os
 from datetime import datetime, timezone, timedelta, date
-from typing import List, Optional
+from typing import List, Optional, Any
 import decimal
 
 
@@ -464,7 +464,8 @@ async def list_history(
         params.update({"start": start, "end": end})
 
         where = [f"device_id IN ({placeholders})", "ts >= :start", "ts <= :end"]
-        cond = "WHERE " + " AND ".join(where)
+        cond = "WHERE " + " AND ".join(where) if where else ""
+        offset = (page - 1) * page_size
 
         count_sql = text(f"""
             SELECT COUNT(*) FROM (
@@ -489,7 +490,6 @@ async def list_history(
             LIMIT :limit OFFSET :offset
         """)
 
-        offset = (page - 1) * page_size
         total = (await conn.execute(count_sql, params)).scalar_one()
         rows = (await conn.execute(query_sql, {**params, "limit": page_size, "offset": offset})).mappings().all()
 
@@ -747,3 +747,88 @@ async def send_email_code_register(data: EmailCodeRequest):
         "msg_en": "Verification code generated (returned for testing)",
         "code": code
     }
+
+from typing import Any
+
+class AlarmItem(BaseModel):
+    id: int
+    device_id: Optional[int]
+    alarm_type: str
+    level: str
+    message: str
+    extra: Optional[Any]
+    status: str
+    created_at: datetime
+    confirmed_at: Optional[datetime]
+    cleared_at: Optional[datetime]
+    cleared_by: Optional[str]
+
+class AlarmListResponse(BaseModel):
+    items: List[AlarmItem]
+    page: int
+    page_size: int
+    total: int
+
+@app.get(
+    "/api/v1/alarms",
+    response_model=AlarmListResponse,
+    tags=["报警 | Alarm"],
+    summary="查询报警信息 | Query Alarm List",
+    description="""
+普通用户只能查询自己设备的报警，管理员/客服可按设备、状态、级别等筛选。
+
+Normal users can only query alarms of their own devices. Admin/service can filter by device, status, level, etc.
+"""
+)
+async def list_alarms(
+    page: int = Query(1, ge=1, description="页码 | Page number"),
+    page_size: int = Query(20, ge=1, le=200, description="每页数量 | Page size"),
+    status: Optional[str] = Query(None, description="报警状态（active/confirmed/cleared）| Alarm status"),
+    device_id: Optional[int] = Query(None, description="设备ID | Device ID"),
+    level: Optional[str] = Query(None, description="报警级别（info/warning/critical/fatal）| Alarm level"),
+    user=Depends(get_current_user)
+):
+    where = []
+    params = {}
+    # 权限控制
+    if user["role"] in ("admin", "service"):
+        # 管理员/客服可按参数筛选
+        if device_id:
+            where.append("device_id = :device_id")
+            params["device_id"] = device_id
+    else:
+        # 普通用户只能查自己设备
+        async with engine.connect() as conn:
+            devices = (await conn.execute(
+                text("SELECT id FROM devices WHERE user_id=:uid"),
+                {"uid": user["user_id"]}
+            )).scalars().all()
+        if not devices:
+            return {"items": [], "page": page, "page_size": page_size, "total": 0}
+        placeholders = ",".join([f":id{i}" for i in range(len(devices))])
+        for i, did in enumerate(devices):
+            params[f"id{i}"] = did
+        where.append(f"device_id IN ({placeholders})")
+    if status:
+        where.append("status = :status")
+        params["status"] = status
+    if level:
+        where.append("level = :level")
+        params["level"] = level
+    cond = "WHERE " + " AND ".join(where) if where else ""
+    offset = (page - 1) * page_size
+
+    async with engine.connect() as conn:
+        count_sql = text(f"SELECT COUNT(*) FROM alarms {cond}")
+        total = (await conn.execute(count_sql, params)).scalar_one()
+        query_sql = text(f"""
+            SELECT *
+            FROM alarms
+            {cond}
+            ORDER BY created_at DESC
+            LIMIT :limit OFFSET :offset
+        """)
+        rows = (await conn.execute(query_sql, {**params, "limit": page_size, "offset": offset})).mappings().all()
+        items = [dict(row) for row in rows]
+
+    return {"items": items, "page": page, "page_size": page_size, "total": total}
