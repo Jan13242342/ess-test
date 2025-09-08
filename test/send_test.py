@@ -2,6 +2,7 @@ import time
 import threading
 import random
 import paho.mqtt.client as mqtt
+import json
 
 MQTT_HOST = "37.114.34.61"   # 改成你的MQTT服务器IP
 MQTT_PORT = 1883
@@ -12,6 +13,9 @@ def build_topic(device_id) -> str:
 
 def build_history_topic(device_id) -> str:
     return f"devices/{device_id}/history"
+
+def build_alarm_topic(device_id) -> str:
+    return f"devices/{device_id}/alarm"
 
 def rnd(a, b):
     return random.randint(a, b)
@@ -47,7 +51,19 @@ def gen_history_payload(device_id: int, ts: str) -> dict:
         "grid_wh_total": rnd(-20000, 20000)  # 新增，允许正负
     }
 
-def device_worker(device_id, interval=2, history_interval=10):
+def gen_alarm_payload(device_id: int) -> dict:
+    # 随机生成一个报警类型和级别
+    alarm_types = ["overvoltage", "offline", "low_soc", "system"]
+    levels = ["info", "warning", "critical", "fatal"]
+    return {
+        "alarm_type": random.choice(alarm_types),
+        "level": random.choice(levels),
+        "message": f"测试报警 device {device_id}",
+        "extra": {"soc": rnd(0, 100), "note": "test alarm"},
+        "status": "active"
+    }
+
+def device_worker(device_id, interval=2, history_interval=300, alarm_interval=90):
     while True:
         try:
             client = mqtt.Client()
@@ -55,9 +71,11 @@ def device_worker(device_id, interval=2, history_interval=10):
             client.loop_start()
             topic = build_topic(device_id)
             history_topic = build_history_topic(device_id)
+            alarm_topic = build_alarm_topic(device_id)
             last_history = time.time()
+            last_alarm = time.time()
             while True:
-                # 发送实时数据（不带dealer_id和user_id）
+                # 发送实时数据
                 payload = gen_payload(device_id)
                 result = client.publish(topic, str(payload).replace("'", '"'), qos=MQTT_QOS)
                 if result.rc != 0:
@@ -74,6 +92,15 @@ def device_worker(device_id, interval=2, history_interval=10):
                         break
                     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] device_id={device_id} sent history to {history_topic}")
                     last_history = time.time()
+                # 定时发送报警数据
+                if time.time() - last_alarm >= alarm_interval:
+                    alarm_payload = gen_alarm_payload(device_id)
+                    alarm_result = client.publish(alarm_topic, json.dumps(alarm_payload), qos=MQTT_QOS)
+                    if alarm_result.rc != 0:
+                        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] device_id={device_id} alarm publish失败: {alarm_result.rc}")
+                        break
+                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] device_id={device_id} sent alarm to {alarm_topic}: {alarm_payload}")
+                    last_alarm = time.time()
                 time.sleep(interval)
         except Exception as e:
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] device_id={device_id} 发生异常: {e}")

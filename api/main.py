@@ -832,3 +832,99 @@ async def list_alarms(
         items = [dict(row) for row in rows]
 
     return {"items": items, "page": page, "page_size": page_size, "total": total}
+
+# 用户只能查自己设备报警
+@app.get(
+    "/api/v1/alarms/user",
+    response_model=AlarmListResponse,
+    tags=["用户 | User"],
+    summary="查询本人设备报警 | Query My Device Alarms",
+    description="普通用户只能查询自己设备的报警。"
+)
+async def list_my_alarms(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    status: Optional[str] = Query(None),
+    level: Optional[str] = Query(None),
+    user=Depends(get_current_user)
+):
+    if user["role"] in ("admin", "service"):
+        raise HTTPException(status_code=403, detail="管理员/客服请用专用接口")
+    async with engine.connect() as conn:
+        devices = (await conn.execute(
+            text("SELECT id FROM devices WHERE user_id=:uid"),
+            {"uid": user["user_id"]}
+        )).scalars().all()
+    if not devices:
+        return {"items": [], "page": page, "page_size": page_size, "total": 0}
+    placeholders = ",".join([f":id{i}" for i in range(len(devices))])
+    params = {f"id{i}": did for i, did in enumerate(devices)}
+    where = [f"device_id IN ({placeholders})"]
+    if status:
+        where.append("status = :status")
+        params["status"] = status
+    if level:
+        where.append("level = :level")
+        params["level"] = level
+    cond = "WHERE " + " AND ".join(where)
+    offset = (page - 1) * page_size
+
+    async with engine.connect() as conn:
+        count_sql = text(f"SELECT COUNT(*) FROM alarms {cond}")
+        total = (await conn.execute(count_sql, params)).scalar_one()
+        query_sql = text(f"""
+            SELECT *
+            FROM alarms
+            {cond}
+            ORDER BY created_at DESC
+            LIMIT :limit OFFSET :offset
+        """)
+        rows = (await conn.execute(query_sql, {**params, "limit": page_size, "offset": offset})).mappings().all()
+        items = [dict(row) for row in rows]
+    return {"items": items, "page": page, "page_size": page_size, "total": total}
+
+# 管理员/客服可查所有报警
+@app.get(
+    "/api/v1/alarms/admin",
+    response_model=AlarmListResponse,
+    tags=["管理员/客服 | Admin/Service"],
+    summary="报警管理查询 | Query All Alarms (Admin/Service)",
+    description="管理员/客服可按设备、状态、级别等筛选报警。"
+)
+async def list_all_alarms(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    status: Optional[str] = Query(None),
+    device_id: Optional[int] = Query(None),
+    level: Optional[str] = Query(None),
+    user=Depends(get_current_user)
+):
+    if user["role"] not in ("admin", "service"):
+        raise HTTPException(status_code=403, detail="无权限")
+    where = []
+    params = {}
+    if device_id:
+        where.append("device_id = :device_id")
+        params["device_id"] = device_id
+    if status:
+        where.append("status = :status")
+        params["status"] = status
+    if level:
+        where.append("level = :level")
+        params["level"] = level
+    cond = "WHERE " + " AND ".join(where) if where else ""
+    offset = (page - 1) * page_size
+
+    async with engine.connect() as conn:
+        count_sql = text(f"SELECT COUNT(*) FROM alarms {cond}")
+        total = (await conn.execute(count_sql, params)).scalar_one()
+        query_sql = text(f"""
+            SELECT *
+            FROM alarms
+            {cond}
+            ORDER BY created_at DESC
+            LIMIT :limit OFFSET :offset
+        """)
+        rows = (await conn.execute(query_sql, {**params, "limit": page_size, "offset": offset})).mappings().all()
+        items = [dict(row) for row in rows]
+    return {"items": items, "page": page, "page_size": page_size, "total": total}
