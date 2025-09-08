@@ -315,6 +315,12 @@ async def bind_device(
                 status_code=404,
                 detail={"msg": "设备不存在", "msg_en": "Device not found"}
             )
+        # 新增判断：如果设备已绑定其他用户，禁止绑定
+        if device.user_id and device.user_id != user_id:
+            raise HTTPException(
+                status_code=403,
+                detail={"msg": "设备已绑定其他用户，请先解绑", "msg_en": "Device is already bound to another user, please unbind first"}
+            )
         if device.user_id == user_id:
             return {
                 "msg": "设备已绑定到该用户",
