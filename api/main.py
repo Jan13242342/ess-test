@@ -951,3 +951,61 @@ async def clear_alarm(
             {"id": data.alarm_id, "by": user["username"]}
         )
     return {"msg": "报警已清除", "msg_en": "Alarm cleared"}
+
+class AlarmBatchActionRequest(BaseModel):
+    alarm_ids: List[int]
+
+@app.post(
+    "/api/v1/alarms/admin/batch_confirm",
+    tags=["管理员/客服 | Admin/Service"],
+    summary="批量确认报警 | Batch Confirm Alarms",
+    description="管理员/客服批量确认报警，将多条报警status设为confirmed并记录确认时间。"
+)
+async def batch_confirm_alarm(
+    data: AlarmBatchActionRequest,
+    user=Depends(get_current_user)
+):
+    if user["role"] not in ("admin", "service"):
+        raise HTTPException(status_code=403, detail="无权限")
+    if not data.alarm_ids:
+        raise HTTPException(status_code=400, detail="alarm_ids不能为空")
+    placeholders = ",".join([f":id{i}" for i in range(len(data.alarm_ids))])
+    params = {f"id{i}": aid for i, aid in enumerate(data.alarm_ids)}
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(f"""
+                UPDATE alarms
+                SET status='confirmed', confirmed_at=now()
+                WHERE id IN ({placeholders}) AND status != 'confirmed'
+            """),
+            params
+        )
+    return {"msg": "批量确认成功", "msg_en": "Batch confirm success"}
+
+@app.post(
+    "/api/v1/alarms/admin/batch_clear",
+    tags=["管理员/客服 | Admin/Service"],
+    summary="批量清除报警 | Batch Clear Alarms",
+    description="管理员/客服批量清除报警，将多条报警status设为cleared并记录清除时间和操作人。"
+)
+async def batch_clear_alarm(
+    data: AlarmBatchActionRequest,
+    user=Depends(get_current_user)
+):
+    if user["role"] not in ("admin", "service"):
+        raise HTTPException(status_code=403, detail="无权限")
+    if not data.alarm_ids:
+        raise HTTPException(status_code=400, detail="alarm_ids不能为空")
+    placeholders = ",".join([f":id{i}" for i in range(len(data.alarm_ids))])
+    params = {f"id{i}": aid for i, aid in enumerate(data.alarm_ids)}
+    params["by"] = user["username"]
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(f"""
+                UPDATE alarms
+                SET status='cleared', cleared_at=now(), cleared_by=:by
+                WHERE id IN ({placeholders}) AND status != 'cleared'
+            """),
+            params
+        )
+    return {"msg": "批量清除成功", "msg_en": "Batch clear success"}
