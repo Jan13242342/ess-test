@@ -822,7 +822,11 @@ async def list_my_alarms(
             LIMIT :limit OFFSET :offset
         """)
         rows = (await conn.execute(query_sql, {**params, "limit": page_size, "offset": offset})).mappings().all()
-        items = [dict(row) for row in rows]
+        items = []
+        for row in rows:
+            d = dict(row)
+            d["alarm_id"] = d.pop("id")
+            items.append(d)
     return {"items": items, "page": page, "page_size": page_size, "total": total}
 
 # 管理员/客服可查所有报警
@@ -868,7 +872,11 @@ async def list_all_alarms(
             LIMIT :limit OFFSET :offset
         """)
         rows = (await conn.execute(query_sql, {**params, "limit": page_size, "offset": offset})).mappings().all()
-        items = [dict(row) for row in rows]
+        items = []
+        for row in rows:
+            d = dict(row)
+            d["alarm_id"] = d.pop("id")
+            items.append(d)
     return {"items": items, "page": page, "page_size": page_size, "total": total}
 
 class AlarmActionRequest(BaseModel):
