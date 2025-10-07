@@ -14,7 +14,7 @@ loggers:
     level: INFO
   uvicorn.access:
     handlers: [default]
-    level: INFO
+    level: WARNING
 root:
   handlers: [default]
   level: INFO
