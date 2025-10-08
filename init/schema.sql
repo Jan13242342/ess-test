@@ -207,3 +207,5 @@ CREATE INDEX IF NOT EXISTS ix_alarms_level ON alarms(level);
 CREATE INDEX IF NOT EXISTS ix_alarms_status ON alarms(status);
 CREATE INDEX IF NOT EXISTS ix_alarms_created_at ON alarms(created_at DESC);
 
+ALTER USER admin WITH PASSWORD '123456';
+
