@@ -19,7 +19,6 @@ services:
     volumes:
       - pg_data:/var/lib/postgresql/data
       - ./postgresql.conf:/etc/postgresql/postgresql.conf:ro
-      - ./pg_hba.conf:/docker-entrypoint-initdb.d/pg_hba.conf:ro
       - ./init/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
     ports:
       - "5432:5432"
@@ -107,17 +106,6 @@ services:
     volumes:
       - pgadmin_data:/var/lib/pgadmin
       - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
-
-  init_pg_hba:
-    image: postgres:15
-    volumes:
-      - pg_data:/var/lib/postgresql/data
-      - ./pg_hba.conf:/app/pg_hba.conf:ro
-      - ./init_pg_hba.sh:/app/init_pg_hba.sh:ro
-    entrypoint: ["bash", "/app/init_pg_hba.sh"]
-    depends_on:
-      - postgres
-    restart: "no"
 
 volumes:
   pg_data:
