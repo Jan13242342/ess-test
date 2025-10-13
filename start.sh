@@ -13,13 +13,12 @@ echo "所有服务已启动！ (All services started!)"
 echo "EMQX Dashboard: http://localhost:18083"
 echo "pgAdmin:        http://localhost:5050"
 
-echo "开始实时监控所有服务日志中的关键字ERROR/WARNING/Exception..."
-docker compose logs -f | grep --line-buffered -E "ERROR|WARNING|Exception"
-
-# ...existing code...
-
 echo "已设置防火墙规则：只允许本地访问 5432 端口"
 iptables -A INPUT -p tcp -s 127.0.0.1 --dport 5432 -j ACCEPT
 iptables -A INPUT -p tcp --dport 5432 -j DROP
 
-# ...existing code...
+
+
+echo "开始实时监控所有服务日志中的关键字ERROR/WARNING/Exception..."
+docker compose logs -f | grep --line-buffered -E "ERROR|WARNING|Exception"
+
