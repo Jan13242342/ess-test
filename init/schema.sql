@@ -209,3 +209,18 @@ CREATE INDEX IF NOT EXISTS ix_alarms_created_at ON alarms(created_at DESC);
 
 ALTER USER admin WITH PASSWORD '123456';
 
+-- 设备参数表：存储设备的可调参数
+-- Device parameters table: stores adjustable parameters for devices
+CREATE TABLE IF NOT EXISTS device_para (
+  id BIGSERIAL PRIMARY KEY,                -- 参数ID，自增主键
+  device_id BIGINT NOT NULL REFERENCES devices(id) ON DELETE CASCADE, -- 设备ID
+  discharge_power INTEGER NOT NULL DEFAULT 0, -- 放电功率
+  charge_power INTEGER NOT NULL DEFAULT 0,    -- 充电功率
+  control_mode TEXT NOT NULL DEFAULT 'test',  -- 控制模式
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now() -- 更新时间
+);
+
+-- 按 device_id 建索引，加速查询
+-- Create index on device_id for faster queries
+CREATE INDEX IF NOT EXISTS idx_device_para_device_id ON device_para(device_id);
+

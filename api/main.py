@@ -1009,3 +1009,34 @@ async def batch_clear_alarm(
             params
         )
     return {"msg": "批量清除成功", "msg_en": "Batch clear success"}
+
+from pydantic import BaseModel
+
+class DevicePara(BaseModel):
+    device_id: int
+    discharge_power: int
+    charge_power: int
+    control_mode: str
+    updated_at: datetime
+
+@app.get(
+    "/api/v1/device/para",
+    response_model=DevicePara,
+    tags=["管理员/客服 | Admin/Service"],
+    summary="查询设备参数（仅管理员/客服）",
+    description="只有管理员和客服可以查询设备参数。"
+)
+async def get_device_para(
+    device_id: int = Query(..., description="设备ID"),
+    user=Depends(get_current_user)
+):
+    if user["role"] not in ("admin", "service"):
+        raise HTTPException(status_code=403, detail="只有管理员和客服可以查询设备参数")
+    async with engine.connect() as conn:
+        row = (await conn.execute(
+            text("SELECT device_id, discharge_power, charge_power, control_mode, updated_at FROM device_para WHERE device_id=:id"),
+            {"id": device_id}
+        )).mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="设备参数不存在")
+    return row
