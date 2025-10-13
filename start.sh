@@ -9,6 +9,12 @@ docker compose build --no-cache
 echo "启动所有服务... (Starting all services...)"
 docker compose up -d
 
+echo "覆盖 pg_hba.conf，只允许本地和 Docker 网络访问..."
+docker exec -i postgres_db bash -c "echo -e 'local   all   all   md5\nhost    all   all   127.0.0.1/32   md5\nhost    all   all   172.18.0.0/16   md5' > /var/lib/postgresql/data/pg_hba.conf"
+docker restart postgres_db
+
+
+
 echo "所有服务已启动！ (All services started!)"
 echo "EMQX Dashboard: http://localhost:18083"
 echo "pgAdmin:        http://localhost:5050"
