@@ -1027,12 +1027,19 @@ class DevicePara(BaseModel):
     description="只有管理员和客服可以查询设备参数。"
 )
 async def get_device_para(
-    device_id: int = Query(..., description="设备ID"),
+    device_sn: str = Query(..., description="设备序列号"),
     user=Depends(get_current_user)
 ):
     if user["role"] not in ("admin", "service"):
         raise HTTPException(status_code=403, detail="只有管理员和客服可以查询设备参数")
     async with engine.connect() as conn:
+        device_row = (await conn.execute(
+            text("SELECT id FROM devices WHERE device_sn=:sn"),
+            {"sn": device_sn}
+        )).mappings().first()
+        if not device_row:
+            raise HTTPException(status_code=404, detail="设备不存在")
+        device_id = device_row["id"]
         row = (await conn.execute(
             text("SELECT device_id, discharge_power, charge_power, control_mode, updated_at FROM device_para WHERE device_id=:id"),
             {"id": device_id}
