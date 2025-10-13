@@ -161,6 +161,29 @@ def parse_alarm_device_id(topic: str):
         return parts[1]
     return None
 
+# 新增 para topic 和队列
+PARA_TOPIC = os.getenv("MQTT_PARA_TOPIC", "$share/ess-ingestor/devices/+/para")
+para_q: Queue[dict] = Queue(maxsize=QUEUE_MAXSIZE)
+
+PARA_UPSERT_SQL = """
+INSERT INTO device_para (
+  device_id, discharge_power, charge_power, control_mode, updated_at
+) VALUES (
+  %(device_id)s, %(discharge_power)s, %(charge_power)s, %(control_mode)s, %(updated_at)s
+)
+ON CONFLICT (device_id) DO UPDATE SET
+  discharge_power=EXCLUDED.discharge_power,
+  charge_power=EXCLUDED.charge_power,
+  control_mode=EXCLUDED.control_mode,
+  updated_at=EXCLUDED.updated_at;
+"""
+
+def parse_para_device_id(topic: str):
+    parts = topic.split("/")
+    if len(parts) >= 3 and parts[0] == "devices" and parts[2] == "para":
+        return parts[1]
+    return None
+
 def on_connect(client, userdata, flags, rc, props=None):
     if rc == 0:
         log(f"[MQTT] connected. subscribing {MQTT_TOPIC} qos={MQTT_QOS}")
@@ -169,6 +192,8 @@ def on_connect(client, userdata, flags, rc, props=None):
         client.subscribe(HISTORY_TOPIC, qos=MQTT_QOS)
         log(f"[MQTT] subscribing {ALARM_TOPIC} qos={MQTT_QOS}")
         client.subscribe(ALARM_TOPIC, qos=MQTT_QOS)
+        log(f"[MQTT] subscribing {PARA_TOPIC} qos={MQTT_QOS}")
+        client.subscribe(PARA_TOPIC, qos=MQTT_QOS)
     else:
         log(f"[MQTT] connect failed rc={rc}")
 
@@ -199,6 +224,18 @@ def on_message(client, userdata, msg):
                 "status": payload.get("status", "active"),
             }
             alarm_q.put(alarm, block=False)
+        elif msg.topic.endswith("/para"):
+            sn = parse_para_device_id(msg.topic)
+            if not sn: return
+            payload = json.loads(msg.payload.decode("utf-8"))
+            para = {
+                "device_id": int(sn),
+                "discharge_power": int(payload.get("discharge_power", 0)),
+                "charge_power": int(payload.get("charge_power", 0)),
+                "control_mode": payload.get("control_mode", "test"),
+                "updated_at": payload.get("updated_at", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+            }
+            para_q.put(para, block=False)
     except Exception as e:
         log("[on_message] error:", e)
 
@@ -314,10 +351,40 @@ def alarm_flusher():
             log("[alarm_flusher] fatal error, will retry in 5s:", e)
             time.sleep(5)
 
+def para_flusher():
+    while not stop_event.is_set():
+        try:
+            conn = psycopg2.connect(PG_DSN)
+            conn.autocommit = False
+            try:
+                while not stop_event.is_set():
+                    batch = []
+                    deadline = time.time() + FLUSH_MS/1000.0
+                    while len(batch) < BATCH_SIZE and time.time() < deadline:
+                        try:
+                            batch.append(para_q.get(timeout=0.05))
+                        except Empty:
+                            pass
+                    if batch:
+                        try:
+                            with conn.cursor() as cur:
+                                execute_batch(cur, PARA_UPSERT_SQL, batch, page_size=1000)
+                            conn.commit()
+                            log(f"[DB] upsert para {len(batch)} rows")
+                        except Exception as e:
+                            log("[para_flusher] DB error:", e)
+                            conn.rollback()
+            finally:
+                conn.close()
+        except Exception as e:
+            log("[para_flusher] fatal error, will retry in 5s:", e)
+            time.sleep(5)
+
 def main():
     t = Thread(target=flusher, daemon=True); t.start()
     ht = Thread(target=history_flusher, daemon=True); ht.start()
     at = Thread(target=alarm_flusher, daemon=True); at.start()
+    pt = Thread(target=para_flusher, daemon=True); pt.start()
     try:
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     except AttributeError:
@@ -332,7 +399,7 @@ def main():
 
     try:
         while not stop_event.is_set():
-            if not t.is_alive() or not ht.is_alive() or not at.is_alive():
+            if not t.is_alive() or not ht.is_alive() or not at.is_alive() or not pt.is_alive():
                 log("[main] flusher thread died, shutting down...")
                 stop_event.set()
             time.sleep(0.5)
