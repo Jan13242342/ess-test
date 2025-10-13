@@ -17,6 +17,9 @@ def build_history_topic(device_id) -> str:
 def build_alarm_topic(device_id) -> str:
     return f"devices/{device_id}/alarm"
 
+def build_para_topic(device_id) -> str:
+    return f"devices/{device_id}/para"
+
 def rnd(a, b):
     return random.randint(a, b)
 
@@ -63,7 +66,16 @@ def gen_alarm_payload(device_id: int) -> dict:
         "status": "active"
     }
 
-def device_worker(device_id, interval=2, history_interval=300, alarm_interval=90):
+def gen_para_payload(device_id: int) -> dict:
+    return {
+        "device_id": device_id,
+        "discharge_power": rnd(100, 500),
+        "charge_power": rnd(100, 500),
+        "control_mode": random.choice(["test", "auto", "manual"]),
+        "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    }
+
+def device_worker(device_id, interval=2, history_interval=300, alarm_interval=90, para_interval=90):
     while True:
         try:
             client = mqtt.Client()
@@ -72,8 +84,10 @@ def device_worker(device_id, interval=2, history_interval=300, alarm_interval=90
             topic = build_topic(device_id)
             history_topic = build_history_topic(device_id)
             alarm_topic = build_alarm_topic(device_id)
+            para_topic = build_para_topic(device_id)
             last_history = time.time()
             last_alarm = time.time()
+            last_para = time.time()
             while True:
                 # 发送实时数据
                 payload = gen_payload(device_id)
@@ -101,6 +115,15 @@ def device_worker(device_id, interval=2, history_interval=300, alarm_interval=90
                         break
                     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] device_id={device_id} sent alarm to {alarm_topic}: {alarm_payload}")
                     last_alarm = time.time()
+                # 定时发送参数数据
+                if time.time() - last_para >= para_interval:
+                    para_payload = gen_para_payload(device_id)
+                    para_result = client.publish(para_topic, json.dumps(para_payload), qos=MQTT_QOS)
+                    if para_result.rc != 0:
+                        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] device_id={device_id} para publish失败: {para_result.rc}")
+                        break
+                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] device_id={device_id} sent para to {para_topic}: {para_payload}")
+                    last_para = time.time()
                 time.sleep(interval)
         except Exception as e:
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] device_id={device_id} 发生异常: {e}")
