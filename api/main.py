@@ -19,6 +19,9 @@ from fastapi.responses import JSONResponse
 import aiosmtplib
 from email.message import EmailMessage
 from random import randint
+import uuid
+import json
+import paho.mqtt.publish as publish
 
 
 
@@ -1047,3 +1050,58 @@ async def get_device_para(
     if not row:
         raise HTTPException(status_code=404, detail="设备参数不存在")
     return row
+
+class RPCChangeRequest(BaseModel):
+    device_sn: str
+    para_name: str
+    para_value: str
+
+@app.post(
+    "/api/v1/device/rpc_change",
+    tags=["管理员/客服 | Admin/Service"],
+    summary="单参数RPC变更",
+    description="通过para_name和para_value远程修改设备参数，自动记录变更日志并通过MQTT下发RPC指令。"
+)
+async def rpc_change(
+    req: RPCChangeRequest,
+    user=Depends(get_current_user)
+):
+    if user["role"] not in ("admin", "service"):
+        raise HTTPException(status_code=403, detail="只有管理员和客服可以操作")
+    async with engine.connect() as conn:
+        device_row = (await conn.execute(
+            text("SELECT id FROM devices WHERE device_sn=:sn"),
+            {"sn": req.device_sn}
+        )).mappings().first()
+        if not device_row:
+            raise HTTPException(status_code=404, detail="设备不存在")
+        device_id = device_row["id"]
+        request_id = str(uuid.uuid4())
+        # 写入变更日志（只存新参数）
+        await conn.execute(
+            text("""
+                INSERT INTO device_config_change_log (
+                  device_id, operator, request_id, change_type, new_config, status
+                ) VALUES (
+                  :device_id, :operator, :request_id, :change_type, :new_config, 'pending'
+                )
+            """),
+            {
+                "device_id": device_id,
+                "operator": user["username"],
+                "request_id": request_id,
+                "change_type": req.para_name,
+                "new_config": json.dumps({req.para_name: req.para_value})
+            }
+        )
+    # 下发MQTT RPC消息
+    mqtt_topic = f"devices/{req.device_sn}/rpc"
+    mqtt_payload = {
+        "request_id": request_id,
+        "para_name": req.para_name,
+        "para_value": req.para_value,
+        "operator": user["username"],
+        "timestamp": datetime.utcnow().isoformat() + "Z"
+    }
+    publish.single(mqtt_topic, json.dumps(mqtt_payload), hostname=os.getenv("MQTT_HOST"), port=int(os.getenv("MQTT_PORT", "1883")))
+    return {"status": "ok", "request_id": request_id}

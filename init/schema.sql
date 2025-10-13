@@ -223,3 +223,17 @@ CREATE TABLE IF NOT EXISTS device_para (
 -- 按 device_id 建索引，加速查询
 CREATE INDEX IF NOT EXISTS idx_device_para_device_id ON device_para(device_id);
 
+-- 设备RPC参数变更记录表：存储设备RPC参数变更的历史记录
+-- Device RPC change log table: stores history of device RPC parameter changes
+CREATE TABLE IF NOT EXISTS device_rpc_change_log (
+  id BIGSERIAL PRIMARY KEY,
+  device_id BIGINT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  operator VARCHAR(64) NOT NULL,           -- 操作人用户名
+  request_id VARCHAR(64) NOT NULL,         -- RPC唯一ID
+  para_name TEXT NOT NULL,                 -- 参数名
+  para_value TEXT NOT NULL,                -- 参数值（可用JSON存储复杂类型）
+  status TEXT NOT NULL DEFAULT 'pending',  -- pending/success/failed
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  confirmed_at TIMESTAMPTZ
+);
+
