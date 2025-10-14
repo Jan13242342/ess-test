@@ -195,16 +195,16 @@ def parse_rpc_ack_device_id(topic: str):
 
 def on_connect(client, userdata, flags, rc, props=None):
     if rc == 0:
-        log(f"[MQTT] connected. subscribing {MQTT_TOPIC} qos={MQTT_QOS}")
-        client.subscribe(MQTT_TOPIC, qos=MQTT_QOS)
-        log(f"[MQTT] subscribing {HISTORY_TOPIC} qos={MQTT_QOS}")
-        client.subscribe(HISTORY_TOPIC, qos=MQTT_QOS)
-        log(f"[MQTT] subscribing {ALARM_TOPIC} qos={MQTT_QOS}")
-        client.subscribe(ALARM_TOPIC, qos=MQTT_QOS)
-        log(f"[MQTT] subscribing {PARA_TOPIC} qos={MQTT_QOS}")
-        client.subscribe(PARA_TOPIC, qos=MQTT_QOS)
-        log(f"[MQTT] subscribing {RPC_ACK_TOPIC} qos={MQTT_QOS}")
-        client.subscribe(RPC_ACK_TOPIC, qos=MQTT_QOS)
+        log(f"[MQTT] connected. subscribing {MQTT_TOPIC} qos=0")
+        client.subscribe(MQTT_TOPIC, qos=0)
+        log(f"[MQTT] subscribing {HISTORY_TOPIC} qos=0")
+        client.subscribe(HISTORY_TOPIC, qos=0)
+        log(f"[MQTT] subscribing {ALARM_TOPIC} qos=1")
+        client.subscribe(ALARM_TOPIC, qos=1)
+        log(f"[MQTT] subscribing {PARA_TOPIC} qos=1")
+        client.subscribe(PARA_TOPIC, qos=0)
+        log(f"[MQTT] subscribing {RPC_ACK_TOPIC} qos=1")
+        client.subscribe(RPC_ACK_TOPIC, qos=1)
     else:
         log(f"[MQTT] connect failed rc={rc}")
 
