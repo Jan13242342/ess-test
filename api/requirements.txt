@@ -8,3 +8,4 @@ bcrypt
 email-validator
 PyJWT
 aiosmtplib
+paho-mqtt
