@@ -184,6 +184,23 @@ def parse_para_device_id(topic: str):
         return parts[1]
     return None
 
+# 新增 RPC 确认 topic 和队列
+RPC_ACK_TOPIC = os.getenv("MQTT_RPC_ACK_TOPIC", "$share/ess-ingestor/devices/+/rpc_ack")
+rpc_ack_q: Queue[dict] = Queue(maxsize=QUEUE_MAXSIZE)
+
+RPC_ACK_UPDATE_SQL = """
+UPDATE device_rpc_change_log 
+SET status=%(status)s, confirmed_at=now()
+WHERE request_id=%(request_id)s 
+AND device_id=(SELECT id FROM devices WHERE device_sn=%(device_sn)s)
+"""
+
+def parse_rpc_ack_device_id(topic: str):
+    parts = topic.split("/")
+    if len(parts) >= 3 and parts[0] == "devices" and parts[2] == "rpc_ack":
+        return parts[1]
+    return None
+
 def on_connect(client, userdata, flags, rc, props=None):
     if rc == 0:
         log(f"[MQTT] connected. subscribing {MQTT_TOPIC} qos={MQTT_QOS}")
@@ -194,6 +211,8 @@ def on_connect(client, userdata, flags, rc, props=None):
         client.subscribe(ALARM_TOPIC, qos=MQTT_QOS)
         log(f"[MQTT] subscribing {PARA_TOPIC} qos={MQTT_QOS}")
         client.subscribe(PARA_TOPIC, qos=MQTT_QOS)
+        log(f"[MQTT] subscribing {RPC_ACK_TOPIC} qos={MQTT_QOS}")
+        client.subscribe(RPC_ACK_TOPIC, qos=MQTT_QOS)
     else:
         log(f"[MQTT] connect failed rc={rc}")
 
@@ -236,6 +255,31 @@ def on_message(client, userdata, msg):
                 "updated_at": payload.get("updated_at", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
             }
             para_q.put(para, block=False)
+        elif msg.topic.endswith("/rpc_ack"):
+            sn = parse_rpc_ack_device_id(msg.topic)
+            if not sn: return
+            payload = json.loads(msg.payload.decode("utf-8"))
+            
+            # 验证必要字段
+            request_id = payload.get("request_id")
+            status = payload.get("status", "error")
+            if not request_id:
+                log(f"[RPC_ACK] missing request_id from device {sn}")
+                return
+            
+            # 验证状态值
+            valid_statuses = ["success", "failed", "error"]
+            if status not in valid_statuses:
+                status = "error"
+            
+            rpc_ack = {
+                "device_sn": sn,  # 注意：这里用 device_sn 而不是 device_id
+                "request_id": request_id,
+                "status": status
+            }
+            rpc_ack_q.put(rpc_ack, block=False)
+            log(f"[RPC_ACK] received from device {sn}: {request_id} -> {status}")
+            
     except Exception as e:
         log("[on_message] error:", e)
 
@@ -380,11 +424,41 @@ def para_flusher():
             log("[para_flusher] fatal error, will retry in 5s:", e)
             time.sleep(5)
 
+def rpc_ack_flusher():
+    while not stop_event.is_set():
+        try:
+            conn = psycopg2.connect(PG_DSN)
+            conn.autocommit = False
+            try:
+                while not stop_event.is_set():
+                    batch = []
+                    deadline = time.time() + FLUSH_MS/1000.0
+                    while len(batch) < BATCH_SIZE and time.time() < deadline:
+                        try:
+                            batch.append(rpc_ack_q.get(timeout=0.05))
+                        except Empty:
+                            pass
+                    if batch:
+                        try:
+                            with conn.cursor() as cur:
+                                execute_batch(cur, RPC_ACK_UPDATE_SQL, batch, page_size=1000)
+                            conn.commit()
+                            log(f"[DB] update rpc_ack {len(batch)} rows")
+                        except Exception as e:
+                            log("[rpc_ack_flusher] DB error:", e)
+                            conn.rollback()
+            finally:
+                conn.close()
+        except Exception as e:
+            log("[rpc_ack_flusher] fatal error, will retry in 5s:", e)
+            time.sleep(5)
+
 def main():
     t = Thread(target=flusher, daemon=True); t.start()
     ht = Thread(target=history_flusher, daemon=True); ht.start()
     at = Thread(target=alarm_flusher, daemon=True); at.start()
     pt = Thread(target=para_flusher, daemon=True); pt.start()
+    rt = Thread(target=rpc_ack_flusher, daemon=True); rt.start()  # 新增 RPC 确认处理线程
     try:
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     except AttributeError:
@@ -399,7 +473,7 @@ def main():
 
     try:
         while not stop_event.is_set():
-            if not t.is_alive() or not ht.is_alive() or not at.is_alive() or not pt.is_alive():
+            if not t.is_alive() or not ht.is_alive() or not at.is_alive() or not pt.is_alive() or not rt.is_alive():
                 log("[main] flusher thread died, shutting down...")
                 stop_event.set()
             time.sleep(0.5)
