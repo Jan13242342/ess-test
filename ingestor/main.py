@@ -51,6 +51,30 @@ def parse_device_id(topic: str):
         return parts[1]
     return None
 
+def parse_history_device_id(topic: str):
+    parts = topic.split("/")
+    if len(parts) >= 3 and parts[0]=="devices" and parts[2]=="history":
+        return parts[1]
+    return None
+
+def parse_alarm_device_id(topic: str):
+    parts = topic.split("/")
+    if len(parts) >= 3 and parts[0]=="devices" and parts[2]=="alarm":
+        return parts[1]
+    return None
+
+def parse_para_device_id(topic: str):
+    parts = topic.split("/")
+    if len(parts) >= 3 and parts[0]=="devices" and parts[2]=="para":
+        return parts[1]
+    return None
+
+def parse_rpc_ack_device_id(topic: str):
+    parts = topic.split("/")
+    if len(parts) >= 3 and parts[0] == "devices" and parts[2] == "rpc_ack":
+        return parts[1]
+    return None
+
 def to_int(v, default=0):
     try:
         if v is None: return default
@@ -127,12 +151,6 @@ ON CONFLICT (device_id, ts) DO UPDATE SET
   grid_wh_total=EXCLUDED.grid_wh_total;
 """
 
-def parse_history_device_id(topic: str):
-    parts = topic.split("/")
-    if len(parts) >= 3 and parts[0]=="devices" and parts[2]=="history":
-        return parts[1]
-    return None
-
 def normalize_history(sn: str, payload: dict) -> dict:
     return {
         "device_id": int(sn),
@@ -154,12 +172,6 @@ INSERT INTO alarms (
   %(device_id)s, %(alarm_type)s, %(level)s, %(message)s, %(extra)s, %(status)s, now()
 )
 """
-
-def parse_alarm_device_id(topic: str):
-    parts = topic.split("/")
-    if len(parts) >= 3 and parts[0]=="devices" and parts[2]=="alarm":
-        return parts[1]
-    return None
 
 # 新增 para topic 和队列
 PARA_TOPIC = os.getenv("MQTT_PARA_TOPIC", "$share/ess-ingestor/devices/+/para")
@@ -186,12 +198,6 @@ WHERE request_id=%(request_id)s
 AND device_id=(SELECT id FROM devices WHERE device_sn=%(device_sn)s)
 AND status = 'pending'
 """
-
-def parse_rpc_ack_device_id(topic: str):
-    parts = topic.split("/")
-    if len(parts) >= 3 and parts[0] == "devices" and parts[2] == "rpc_ack":
-        return parts[1]
-    return None
 
 def on_connect(client, userdata, flags, rc, props=None):
     if rc == 0:
@@ -241,9 +247,7 @@ def on_message(client, userdata, msg):
             payload = json.loads(msg.payload.decode("utf-8"))
             para = {
                 "device_id": int(sn),
-                "discharge_power": int(payload.get("discharge_power", 0)),
-                "charge_power": int(payload.get("charge_power", 0)),
-                "control_mode": payload.get("control_mode", "test"),
+                "para": payload,  # 直接存整个参数为 JSON
                 "updated_at": payload.get("updated_at", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
             }
             para_q.put(para, block=False)
