@@ -165,24 +165,14 @@ def parse_alarm_device_id(topic: str):
 PARA_TOPIC = os.getenv("MQTT_PARA_TOPIC", "$share/ess-ingestor/devices/+/para")
 para_q: Queue[dict] = Queue(maxsize=QUEUE_MAXSIZE)
 
+# 新版参数 upsert SQL
 PARA_UPSERT_SQL = """
-INSERT INTO device_para (
-  device_id, discharge_power, charge_power, control_mode, updated_at
-) VALUES (
-  %(device_id)s, %(discharge_power)s, %(charge_power)s, %(control_mode)s, %(updated_at)s
-)
+INSERT INTO device_para (device_id, para, updated_at)
+VALUES (%(device_id)s, %(para)s::jsonb, %(updated_at)s)
 ON CONFLICT (device_id) DO UPDATE SET
-  discharge_power=EXCLUDED.discharge_power,
-  charge_power=EXCLUDED.charge_power,
-  control_mode=EXCLUDED.control_mode,
-  updated_at=EXCLUDED.updated_at;
+  para = EXCLUDED.para,
+  updated_at = EXCLUDED.updated_at;
 """
-
-def parse_para_device_id(topic: str):
-    parts = topic.split("/")
-    if len(parts) >= 3 and parts[0] == "devices" and parts[2] == "para":
-        return parts[1]
-    return None
 
 # 新增 RPC 确认 topic 和队列
 RPC_ACK_TOPIC = os.getenv("MQTT_RPC_ACK_TOPIC", "$share/ess-ingestor/devices/+/rpc_ack")
@@ -414,9 +404,18 @@ def para_flusher():
                     if batch:
                         try:
                             with conn.cursor() as cur:
-                                execute_batch(cur, PARA_UPSERT_SQL, batch, page_size=1000)
+                                # 组装参数
+                                upsert_data = [
+                                    {
+                                        "device_id": rec["device_id"],
+                                        "para": json.dumps(rec["para"]),
+                                        "updated_at": rec["updated_at"]
+                                    }
+                                    for rec in batch
+                                ]
+                                psycopg2.extras.execute_batch(cur, PARA_UPSERT_SQL, upsert_data, page_size=1000)
                             conn.commit()
-                            log(f"[DB] upsert para {len(batch)} rows")
+                            log(f"[DB] upsert {len(batch)} para rows")
                         except Exception as e:
                             log("[para_flusher] DB error:", e)
                             conn.rollback()
