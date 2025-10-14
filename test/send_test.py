@@ -67,11 +67,16 @@ def gen_alarm_payload(device_id: int) -> dict:
     }
 
 def gen_para_payload(device_id: int) -> dict:
-    return {
-        "device_id": device_id,
+    # 所有参数都放在 para 字段，方便后端直接存 JSON
+    para = {
         "discharge_power": rnd(100, 500),
         "charge_power": rnd(100, 500),
         "control_mode": random.choice(["test", "auto", "manual"]),
+        "future_param": rnd(1, 100)  # 可扩展参数
+    }
+    return {
+        "device_id": device_id,
+        "para": para,
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     }
 
@@ -115,7 +120,7 @@ def device_worker(device_id, interval=2, history_interval=300, alarm_interval=90
                         break
                     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] device_id={device_id} sent alarm to {alarm_topic}: {alarm_payload}")
                     last_alarm = time.time()
-                # 定时发送参数数据
+                # 定时发送参数数据（新版para结构）
                 if time.time() - last_para >= para_interval:
                     para_payload = gen_para_payload(device_id)
                     para_result = client.publish(para_topic, json.dumps(para_payload), qos=MQTT_QOS)

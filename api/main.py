@@ -1016,24 +1016,24 @@ async def batch_clear_alarm(
         )
     return {"msg": "批量清除成功", "msg_en": "Batch clear success"}
 
-from pydantic import BaseModel
-
 class DevicePara(BaseModel):
     device_id: int
-    discharge_power: int
-    charge_power: int
-    control_mode: str
+    para: dict  # 所有参数都放在 para 字段
     updated_at: datetime
 
 @app.get(
     "/api/v1/device/para",
     response_model=DevicePara,
     tags=["管理员/客服 | Admin/Service"],
-    summary="查询设备参数（仅管理员/客服）",
-    description="只有管理员和客服可以查询设备参数。"
+    summary="查询设备参数（仅管理员/客服） | Query Device Parameters (Admin/Service Only)",
+    description="""
+只有管理员和客服可以查询设备参数。
+
+Only admin and service staff can query device parameters.
+"""
 )
 async def get_device_para(
-    device_sn: str = Query(..., description="设备序列号"),
+    device_sn: str = Query(..., description="设备序列号 | Device Serial Number"),
     user=Depends(get_current_user)
 ):
     if user["role"] not in ("admin", "service"):
@@ -1047,11 +1047,12 @@ async def get_device_para(
             raise HTTPException(status_code=404, detail="设备不存在")
         device_id = device_row["id"]
         row = (await conn.execute(
-            text("SELECT device_id, discharge_power, charge_power, control_mode, updated_at FROM device_para WHERE device_id=:id"),
+            text("SELECT device_id, para, updated_at FROM device_para WHERE device_id=:id"),
             {"id": device_id}
         )).mappings().first()
     if not row:
         raise HTTPException(status_code=404, detail="设备参数不存在")
+    # para字段自动转为dict返回
     return row
 
 class RPCChangeRequest(BaseModel):
@@ -1140,15 +1141,19 @@ class RPCLogListResponse(BaseModel):
     "/api/v1/device/rpc_history",
     response_model=RPCLogListResponse,
     tags=["管理员/客服 | Admin/Service"],
-    summary="查询RPC变更历史",
-    description="查询设备的RPC变更历史记录，支持按设备SN、状态、操作人筛选。"
+    summary="查询RPC变更历史 | Query RPC Change History",
+    description="""
+查询设备的RPC变更历史记录，支持按设备SN、状态、操作人筛选。
+
+Query RPC change history for devices. Supports filtering by device SN, status, and operator.
+"""
 )
 async def get_rpc_history(
-    device_sn: Optional[str] = Query(None, description="设备序列号"),
-    status: Optional[str] = Query(None, description="状态: pending/success/failed/error/timeout"),
-    operator: Optional[str] = Query(None, description="操作人用户名"),
-    page: int = Query(1, ge=1, description="页码"),
-    page_size: int = Query(20, ge=1, le=200, description="每页数量"),
+    device_sn: Optional[str] = Query(None, description="设备序列号 | Device Serial Number"),
+    status: Optional[str] = Query(None, description="状态: pending/success/failed/error/timeout | Status"),
+    operator: Optional[str] = Query(None, description="操作人用户名 | Operator Username"),
+    page: int = Query(1, ge=1, description="页码 | Page number"),
+    page_size: int = Query(20, ge=1, le=200, description="每页数量 | Page size"),
     user=Depends(get_current_user)
 ):
     if user["role"] not in ("admin", "service"):
@@ -1231,11 +1236,15 @@ async def startup_event():
 @app.delete(
     "/api/v1/device/rpc_log/cleanup",
     tags=["管理员/客服 | Admin/Service"],
-    summary="按设备SN清理RPC日志",
-    description="管理员可按设备序列号清除该设备所有RPC日志。"
+    summary="按设备SN清理RPC日志 | Cleanup RPC Logs by Device SN",
+    description="""
+管理员可按设备序列号清除该设备所有RPC日志。
+
+Admin can cleanup all RPC logs for a device by its serial number.
+"""
 )
 async def cleanup_rpc_log_by_sn(
-    device_sn: str = Query(..., description="设备序列号"),
+    device_sn: str = Query(..., description="设备序列号 | Device Serial Number"),
     user=Depends(get_current_user)
 ):
     if user["role"] != "admin":
