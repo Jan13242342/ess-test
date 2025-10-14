@@ -1068,7 +1068,7 @@ async def rpc_change(
 ):
     if user["role"] not in ("admin", "service"):
         raise HTTPException(status_code=403, detail="只有管理员和客服可以操作")
-    async with engine.connect() as conn:
+    async with engine.begin() as conn:  # 改为 engine.begin() 自动提交事务
         device_row = (await conn.execute(
             text("SELECT id FROM devices WHERE device_sn=:sn"),
             {"sn": req.device_sn}
