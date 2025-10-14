@@ -2,6 +2,9 @@ import os
 from datetime import datetime, timezone, timedelta, date
 from typing import List, Optional, Any
 import decimal
+import time
+import random
+import string
 
 
 from dotenv import load_dotenv, find_dotenv
@@ -1068,7 +1071,7 @@ async def rpc_change(
 ):
     if user["role"] not in ("admin", "service"):
         raise HTTPException(status_code=403, detail="只有管理员和客服可以操作")
-    async with engine.begin() as conn:  # 改为 engine.begin() 自动提交事务
+    async with engine.begin() as conn:
         device_row = (await conn.execute(
             text("SELECT id FROM devices WHERE device_sn=:sn"),
             {"sn": req.device_sn}
@@ -1076,7 +1079,12 @@ async def rpc_change(
         if not device_row:
             raise HTTPException(status_code=404, detail="设备不存在")
         device_id = device_row["id"]
-        request_id = str(uuid.uuid4())
+        
+        # 生成时间戳 + 随机字母的 request_id
+        timestamp = str(int(time.time()))
+        random_letters = ''.join(random.choices(string.ascii_uppercase, k=4))
+        request_id = f"{timestamp}{random_letters}"
+        
         # 写入变更日志（只存新参数）
         await conn.execute(
             text("""
