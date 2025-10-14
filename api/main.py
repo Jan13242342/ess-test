@@ -1080,18 +1080,18 @@ async def rpc_change(
         # 写入变更日志（只存新参数）
         await conn.execute(
             text("""
-                INSERT INTO device_config_change_log (
-                  device_id, operator, request_id, change_type, new_config, status
+                INSERT INTO device_rpc_change_log (
+                  device_id, operator, request_id, para_name, para_value, status
                 ) VALUES (
-                  :device_id, :operator, :request_id, :change_type, :new_config, 'pending'
+                  :device_id, :operator, :request_id, :para_name, :para_value, 'pending'
                 )
             """),
             {
                 "device_id": device_id,
                 "operator": user["username"],
                 "request_id": request_id,
-                "change_type": req.para_name,
-                "new_config": json.dumps({req.para_name: req.para_value})
+                "para_name": req.para_name,
+                "para_value": req.para_value
             }
         )
     # 下发MQTT RPC消息
