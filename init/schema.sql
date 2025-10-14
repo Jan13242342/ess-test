@@ -232,8 +232,15 @@ CREATE TABLE IF NOT EXISTS device_rpc_change_log (
   request_id VARCHAR(64) NOT NULL,         -- RPC唯一ID
   para_name TEXT NOT NULL,                 -- 参数名
   para_value TEXT NOT NULL,                -- 参数值（可用JSON存储复杂类型）
-  status TEXT NOT NULL DEFAULT 'pending',  -- pending/success/failed
+  status TEXT NOT NULL DEFAULT 'pending',  -- pending/success/failed/error/timeout
+  message TEXT,                            -- 确认消息（设备回复的详细信息）
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   confirmed_at TIMESTAMPTZ
 );
+
+-- 添加 RPC 变更日志索引
+CREATE INDEX IF NOT EXISTS idx_rpc_change_log_device_id ON device_rpc_change_log(device_id);
+CREATE INDEX IF NOT EXISTS idx_rpc_change_log_request_id ON device_rpc_change_log(request_id);
+CREATE INDEX IF NOT EXISTS idx_rpc_change_log_status ON device_rpc_change_log(status);
+CREATE INDEX IF NOT EXISTS idx_rpc_change_log_created_at ON device_rpc_change_log(created_at DESC);
 

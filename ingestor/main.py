@@ -188,11 +188,13 @@ def parse_para_device_id(topic: str):
 RPC_ACK_TOPIC = os.getenv("MQTT_RPC_ACK_TOPIC", "$share/ess-ingestor/devices/+/rpc_ack")
 rpc_ack_q: Queue[dict] = Queue(maxsize=QUEUE_MAXSIZE)
 
+# 修改 RPC 确认更新 SQL - 移除超时检测，只更新 pending 状态
 RPC_ACK_UPDATE_SQL = """
 UPDATE device_rpc_change_log 
 SET status=%(status)s, confirmed_at=now()
 WHERE request_id=%(request_id)s 
 AND device_id=(SELECT id FROM devices WHERE device_sn=%(device_sn)s)
+AND status = 'pending'
 """
 
 def parse_rpc_ack_device_id(topic: str):
@@ -267,13 +269,13 @@ def on_message(client, userdata, msg):
                 log(f"[RPC_ACK] missing request_id from device {sn}")
                 return
             
-            # 验证状态值
-            valid_statuses = ["success", "failed", "error"]
+            # 验证状态值，支持设备端发送的 timeout 状态
+            valid_statuses = ["success", "failed", "error", "timeout"]
             if status not in valid_statuses:
                 status = "error"
             
             rpc_ack = {
-                "device_sn": sn,  # 注意：这里用 device_sn 而不是 device_id
+                "device_sn": sn,
                 "request_id": request_id,
                 "status": status
             }
