@@ -1268,3 +1268,39 @@ async def cleanup_rpc_log_by_sn(
         "deleted_count": result.rowcount,
         "device_sn": device_sn
     }
+
+class UserDeleteRequest(BaseModel):
+    password: str = Field(..., description="当前密码 | Current password")
+
+@app.delete(
+    "/api/v1/user/delete",
+    tags=["用户 | User"],
+    summary="删除自己的账户 | Delete Own Account",
+    description="""
+用户可自助注销账户，需验证当前密码。注销前会自动解绑所有设备，操作不可恢复。
+
+User can delete their own account after verifying the current password. All devices will be unbound before deletion. This action cannot be undone.
+"""
+)
+async def delete_user_account(
+    req: UserDeleteRequest,
+    user=Depends(get_current_user)
+):
+    async with async_session() as session:
+        # 校验密码
+        result = await session.execute(
+            text("SELECT password_hash FROM users WHERE id=:uid"),
+            {"uid": user["user_id"]}
+        )
+        row = result.first()
+        if not row or not bcrypt.checkpw(req.password.encode(), row.password_hash.encode()):
+            raise HTTPException(status_code=401, detail={"msg": "密码错误", "msg_en": "Incorrect password"})
+        # 解绑所有设备
+        await session.execute(
+            text("UPDATE devices SET user_id=NULL WHERE user_id=:uid"),
+            {"uid": user["user_id"]}
+        )
+        # 删除用户及相关数据
+        await session.execute(text("DELETE FROM users WHERE id=:uid"), {"uid": user["user_id"]})
+        await session.commit()
+    return {"msg": "账户已删除，设备已解绑", "msg_en": "Account deleted and devices unbound"}
