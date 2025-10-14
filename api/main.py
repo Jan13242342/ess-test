@@ -1304,3 +1304,39 @@ async def delete_user_account(
         await session.execute(text("DELETE FROM users WHERE id=:uid"), {"uid": user["user_id"]})
         await session.commit()
     return {"msg": "账户已删除，设备已解绑", "msg_en": "Account deleted and devices unbound"}
+
+class UserChangePasswordRequest(BaseModel):
+    old_password: str = Field(..., description="当前密码 | Current password")
+    new_password: str = Field(..., description="新密码 | New password")
+
+@app.post(
+    "/api/v1/user/change_password",
+    tags=["用户 | User"],
+    summary="修改自己的密码 | Change Own Password",
+    description="""
+用户可自助修改密码，需验证当前密码。
+
+User can change their own password after verifying the current password.
+"""
+)
+async def change_user_password(
+    req: UserChangePasswordRequest,
+    user=Depends(get_current_user)
+):
+    async with async_session() as session:
+        # 校验旧密码
+        result = await session.execute(
+            text("SELECT password_hash FROM users WHERE id=:uid"),
+            {"uid": user["user_id"]}
+        )
+        row = result.first()
+        if not row or not bcrypt.checkpw(req.old_password.encode(), row.password_hash.encode()):
+            raise HTTPException(status_code=401, detail={"msg": "当前密码错误", "msg_en": "Incorrect current password"})
+        # 更新新密码
+        new_hash = bcrypt.hashpw(req.new_password.encode(), bcrypt.gensalt()).decode()
+        await session.execute(
+            text("UPDATE users SET password_hash=:p WHERE id=:uid"),
+            {"p": new_hash, "uid": user["user_id"]}
+        )
+        await session.commit()
+    return {"msg": "密码修改成功", "msg_en": "Password changed successfully"}
