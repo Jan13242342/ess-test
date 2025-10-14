@@ -262,25 +262,25 @@ def on_message(client, userdata, msg):
             if not sn: return
             payload = json.loads(msg.payload.decode("utf-8"))
             
-            # 验证必要字段
-            request_id = payload.get("request_id")
+            # 验证必要字段 - 使用 response_id
+            response_id = payload.get("response_id")
             status = payload.get("status", "error")
-            if not request_id:
-                log(f"[RPC_ACK] missing request_id from device {sn}")
+            if not response_id:
+                log(f"[RPC_ACK] missing response_id from device {sn}")
                 return
             
-            # 验证状态值，支持设备端发送的 timeout 状态
+            # 验证状态值
             valid_statuses = ["success", "failed", "error", "timeout"]
             if status not in valid_statuses:
                 status = "error"
             
             rpc_ack = {
                 "device_sn": sn,
-                "request_id": request_id,
+                "request_id": response_id,  # 数据库字段仍叫 request_id，但值来自 response_id
                 "status": status
             }
             rpc_ack_q.put(rpc_ack, block=False)
-            log(f"[RPC_ACK] received from device {sn}: {request_id} -> {status}")
+            log(f"[RPC_ACK] received from device {sn}: {response_id} -> {status}")
             
     except Exception as e:
         log("[on_message] error:", e)

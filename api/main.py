@@ -1058,6 +1058,7 @@ class RPCChangeRequest(BaseModel):
     device_sn: str
     para_name: str
     para_value: str
+    message: Optional[str] = None  # 添加可选的 message 字段
 
 @app.post(
     "/api/v1/device/rpc_change",
@@ -1085,13 +1086,13 @@ async def rpc_change(
         random_letters = ''.join(random.choices(string.ascii_uppercase, k=4))
         request_id = f"{timestamp}{random_letters}"
         
-        # 写入变更日志（只存新参数）
+        # 写入变更日志，包含 message
         await conn.execute(
             text("""
                 INSERT INTO device_rpc_change_log (
-                  device_id, operator, request_id, para_name, para_value, status
+                  device_id, operator, request_id, para_name, para_value, status, message
                 ) VALUES (
-                  :device_id, :operator, :request_id, :para_name, :para_value, 'pending'
+                  :device_id, :operator, :request_id, :para_name, :para_value, 'pending', :message
                 )
             """),
             {
@@ -1099,7 +1100,8 @@ async def rpc_change(
                 "operator": user["username"],
                 "request_id": request_id,
                 "para_name": req.para_name,
-                "para_value": req.para_value
+                "para_value": req.para_value,
+                "message": req.message or f"change {req.para_name} = {req.para_value}"  # 默认消息
             }
         )
     # 下发MQTT RPC消息
@@ -1109,7 +1111,151 @@ async def rpc_change(
         "para_name": req.para_name,
         "para_value": req.para_value,
         "operator": user["username"],
+        "message": req.message or f"change {req.para_name} = {req.para_value}",  # 也发给设备
         "timestamp": datetime.utcnow().isoformat() + "Z"
     }
     publish.single(mqtt_topic, json.dumps(mqtt_payload), hostname=os.getenv("MQTT_HOST"), port=int(os.getenv("MQTT_PORT", "1883")))
-    return {"status": "ok", "request_id": request_id}
+    return {"status": "ok", "request_id": request_id, "message": req.message}
+
+class RPCChangeLog(BaseModel):
+    id: int
+    device_id: int
+    device_sn: Optional[str] = None
+    operator: str
+    request_id: str
+    para_name: str
+    para_value: str
+    status: str  # pending/success/failed/error/timeout
+    message: Optional[str] = None
+    created_at: datetime
+    confirmed_at: Optional[datetime] = None
+
+class RPCLogListResponse(BaseModel):
+    items: List[RPCChangeLog]
+    page: int
+    page_size: int
+    total: int
+
+@app.get(
+    "/api/v1/device/rpc_history",
+    response_model=RPCLogListResponse,
+    tags=["管理员/客服 | Admin/Service"],
+    summary="查询RPC变更历史",
+    description="查询设备的RPC变更历史记录，支持按设备SN、状态、操作人筛选。"
+)
+async def get_rpc_history(
+    device_sn: Optional[str] = Query(None, description="设备序列号"),
+    status: Optional[str] = Query(None, description="状态: pending/success/failed/error/timeout"),
+    operator: Optional[str] = Query(None, description="操作人用户名"),
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(20, ge=1, le=200, description="每页数量"),
+    user=Depends(get_current_user)
+):
+    if user["role"] not in ("admin", "service"):
+        raise HTTPException(status_code=403, detail="无权限")
+    
+    where = []
+    params = {}
+    
+    if device_sn:
+        where.append("d.device_sn = :device_sn")
+        params["device_sn"] = device_sn
+    
+    if status:
+        where.append("r.status = :status")
+        params["status"] = status
+    
+    if operator:
+        where.append("r.operator = :operator")
+        params["operator"] = operator
+    
+    cond = "WHERE " + " AND ".join(where) if where else ""
+    offset = (page - 1) * page_size
+    
+    async with engine.connect() as conn:
+        count_sql = text(f"""
+            SELECT COUNT(*) 
+            FROM device_rpc_change_log r
+            JOIN devices d ON r.device_id = d.id
+            {cond}
+        """)
+        total = (await conn.execute(count_sql, params)).scalar_one()
+        
+        query_sql = text(f"""
+            SELECT r.*, d.device_sn 
+            FROM device_rpc_change_log r
+            JOIN devices d ON r.device_id = d.id
+            {cond}
+            ORDER BY r.created_at DESC
+            LIMIT :limit OFFSET :offset
+        """)
+        rows = (await conn.execute(query_sql, {**params, "limit": page_size, "offset": offset})).mappings().all()
+    
+    items = [dict(row) for row in rows]
+    return {"items": items, "page": page, "page_size": page_size, "total": total}
+
+import asyncio
+
+async def cleanup_rpc_logs():
+    """每天凌晨2点分批清理6个月前的RPC日志，每批最多500条"""
+    while True:
+        # 计算距离下一个凌晨2点的秒数
+        now = datetime.now()
+        tomorrow_2am = (now + timedelta(days=1)).replace(hour=2, minute=0, second=0, microsecond=0)
+        sleep_seconds = (tomorrow_2am - now).total_seconds()
+        await asyncio.sleep(sleep_seconds)
+        try:
+            async with engine.begin() as conn:
+                total_deleted = 0
+                while True:
+                    result = await conn.execute(
+                        text("""
+                            DELETE FROM device_rpc_change_log
+                            WHERE created_at < now() - INTERVAL '6 months'
+                            LIMIT 500
+                        """)
+                    )
+                    deleted = result.rowcount
+                    total_deleted += deleted
+                    if deleted < 500:
+                        break
+                if total_deleted > 0:
+                    print(f"清理了 {total_deleted} 条6个月前的RPC历史记录")
+        except Exception as e:
+            print(f"清理RPC日志失败: {e}")
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(cleanup_rpc_logs())
+
+@app.delete(
+    "/api/v1/device/rpc_log/cleanup",
+    tags=["管理员/客服 | Admin/Service"],
+    summary="按设备SN清理RPC日志",
+    description="管理员可按设备序列号清除该设备所有RPC日志。"
+)
+async def cleanup_rpc_log_by_sn(
+    device_sn: str = Query(..., description="设备序列号"),
+    user=Depends(get_current_user)
+):
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="只有管理员可以清理RPC日志")
+    async with engine.begin() as conn:
+        # 查找设备ID
+        device_row = (await conn.execute(
+            text("SELECT id FROM devices WHERE device_sn=:sn"),
+            {"sn": device_sn}
+        )).mappings().first()
+        if not device_row:
+            raise HTTPException(status_code=404, detail="设备不存在")
+        device_id = device_row["id"]
+        # 删除该设备所有RPC日志
+        result = await conn.execute(
+            text("DELETE FROM device_rpc_change_log WHERE device_id=:id"),
+            {"id": device_id}
+        )
+    return {
+        "msg": f"已清除设备 {device_sn} 的所有RPC日志",
+        "deleted_count": result.rowcount,
+        "device_sn": device_sn
+    }
