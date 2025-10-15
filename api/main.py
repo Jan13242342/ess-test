@@ -1406,3 +1406,39 @@ async def stat_user_count(
         "user_count": user_count,
         "bound_user_count": bound_user_count
     }
+
+@app.get(
+    "/api/v1/alarms/unhandled_count",
+    tags=["管理员/客服 | Admin/Service"],
+    summary="统计未处理报警数量（含各等级） | Count Unhandled Alarms (by Level)",
+    description="""
+仅管理员和客服可用。统计所有未处理（active/pending）报警的总数量及各等级数量。
+
+Admin and service only. Count the total number of unhandled alarms (status = active or pending), and the count by level.
+"""
+)
+async def count_unhandled_alarms(
+    user=Depends(get_current_user)
+):
+    if user["role"] not in ("admin", "service"):
+        raise HTTPException(status_code=403, detail="无权限")
+    async with engine.connect() as conn:
+        # 总数
+        total_sql = text("""
+            SELECT COUNT(*) FROM alarms
+            WHERE status IN ('active', 'pending')
+        """)
+        total_count = (await conn.execute(total_sql)).scalar_one()
+        # 按等级统计
+        level_sql = text("""
+            SELECT level, COUNT(*) AS count
+            FROM alarms
+            WHERE status IN ('active', 'pending')
+            GROUP BY level
+        """)
+        rows = (await conn.execute(level_sql)).mappings().all()
+        level_counts = {row["level"]: row["count"] for row in rows}
+    return {
+        "unhandled_alarm_count": total_count,
+        "level_counts": level_counts
+    }
