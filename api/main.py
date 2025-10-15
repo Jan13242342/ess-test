@@ -1340,3 +1340,69 @@ async def change_user_password(
         )
         await session.commit()
     return {"msg": "密码修改成功", "msg_en": "Password changed successfully"}
+
+@app.get(
+    "/api/v1/device/stat_count",
+    tags=["管理员/客服 | Admin/Service"],
+    summary="设备数量与在线数量统计 | Device Count & Online Count",
+    description="""
+仅管理员和客服可用。统计所有设备总数量和在线设备数量（60秒内有实时数据视为在线）。
+
+Admin and service only. Count total devices and online devices (devices with realtime data in the last 60 seconds are considered online).
+"""
+)
+async def stat_device_count(
+    fresh_secs: int = Query(60, description="判定在线的秒数 | Seconds to judge online"),
+    user=Depends(get_current_user)
+):
+    if user["role"] not in ("admin", "service"):
+        raise HTTPException(status_code=403, detail="无权限")
+    now = datetime.now(timezone.utc)
+    async with engine.connect() as conn:
+        # 总设备数
+        total_sql = text("SELECT COUNT(*) FROM devices")
+        device_count = (await conn.execute(total_sql)).scalar_one()
+        # 在线设备数
+        online_sql = text("""
+            SELECT COUNT(DISTINCT device_id)
+            FROM ess_realtime_data
+            WHERE updated_at >= :since
+        """)
+        since = now - timedelta(seconds=fresh_secs)
+        online_count = (await conn.execute(online_sql, {"since": since})).scalar_one()
+    return {
+        "device_count": device_count,
+        "online_count": online_count,
+        "fresh_secs": fresh_secs
+    }
+
+@app.get(
+    "/api/v1/user/stat_count",
+    tags=["管理员/客服 | Admin/Service"],
+    summary="用户数量与已绑定设备用户数量统计 | User Count & Bound Device User Count",
+    description="""
+仅管理员和客服可用。统计用户总数量和已绑定设备的用户数量。
+
+Admin and service only. Count total users and users who have at least one bound device.
+"""
+)
+async def stat_user_count(
+    user=Depends(get_current_user)
+):
+    if user["role"] not in ("admin", "service"):
+        raise HTTPException(status_code=403, detail="无权限")
+    async with engine.connect() as conn:
+        # 用户总数量
+        total_sql = text("SELECT COUNT(*) FROM users")
+        user_count = (await conn.execute(total_sql)).scalar_one()
+        # 已绑定设备的用户数量
+        bound_sql = text("""
+            SELECT COUNT(DISTINCT user_id)
+            FROM devices
+            WHERE user_id IS NOT NULL
+        """)
+        bound_user_count = (await conn.execute(bound_sql)).scalar_one()
+    return {
+        "user_count": user_count,
+        "bound_user_count": bound_user_count
+    }
