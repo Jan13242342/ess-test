@@ -532,6 +532,11 @@ def rpc_ack_flusher():
             log("[rpc_ack_flusher] fatal error, will retry in 5s:", e)
             time.sleep(5)
 
+def parse_dt(val):
+    if isinstance(val, str):
+        return dateutil.parser.parse(val)
+    return val
+
 def main():
     t = Thread(target=flusher, daemon=True); t.start()
     ht = Thread(target=history_flusher, daemon=True); ht.start()
