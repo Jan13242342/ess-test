@@ -1317,35 +1317,8 @@ async def get_rpc_history(
     items = [dict(row) for row in rows]
     return {"items": items, "page": page, "page_size": page_size, "total": total}
 
-@app.delete(
-    "/api/v1/device/rpc_log/cleanup",
-    tags=["管理员/客服 | Admin/Service"],
-    summary="按设备SN清理RPC日志 | Cleanup RPC Logs by Device SN",
-    description="管理员可按设备序列号清除该设备所有RPC日志。"
-)
-async def cleanup_rpc_log_by_sn(
-    device_sn: str = Query(..., description="设备序列号"),
-    user=Depends(get_current_user)
-):
-    if user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="只有管理员可以清理RPC日志")
-    async with engine.begin() as conn:
-        device_row = (await conn.execute(
-            text("SELECT id FROM devices WHERE device_sn=:sn"),
-            {"sn": device_sn}
-        )).mappings().first()
-        if not device_row:
-            raise HTTPException(status_code=404, detail="设备不存在")
-        device_id = device_row["id"]
-        result = await conn.execute(
-            text("DELETE FROM device_rpc_change_log WHERE device_id=:id"),
-            {"id": device_id}
-        )
-    return {
-        "msg": f"已清除设备 {device_sn} 的所有RPC日志",
-        "deleted_count": result.rowcount,
-        "device_sn": device_sn
-    }
+
+
 
 @app.delete(
     "/api/v1/admin/rpc_log/clear_all",
@@ -1536,12 +1509,12 @@ class AdminBatchDeleteAlarmHistoryBySNRequest(BaseModel):
     device_sn: str
 
 @app.delete(
-    "/api/v1/admin/alarm_history/batch_delete_by_sn",
+    "/api/v1/admin/alarm_history/delete_by_sn",
     tags=["管理员 | Admin Only"],
     summary="管理员按设备SN批量删除历史报警",
     description="只有管理员可以按设备SN批量删除历史报警记录，客服无权限。"
 )
-async def admin_batch_delete_alarm_history_by_sn(
+async def admin_delete_alarm_history_by_sn(
     data: AdminBatchDeleteAlarmHistoryBySNRequest,
     user=Depends(get_current_user)
 ):
@@ -1570,12 +1543,12 @@ class AdminBatchDeleteRPCLogBySNRequest(BaseModel):
     device_sn: str
 
 @app.delete(
-    "/api/v1/admin/rpc_log/batch_delete_by_sn",
+    "/api/v1/admin/rpc_log/delete_by_sn",
     tags=["管理员 | Admin Only"],
     summary="管理员按设备SN批量删除RPC日志",
     description="只有管理员可以按设备SN批量删除RPC日志，客服无权限。"
 )
-async def admin_batch_delete_rpc_log_by_sn(
+async def admin_delete_rpc_log_by_sn(
     data: AdminBatchDeleteRPCLogBySNRequest,
     user=Depends(get_current_user)
 ):
