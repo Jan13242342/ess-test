@@ -1572,6 +1572,7 @@ async def confirm_alarm_by_sn_and_code(
     if user["role"] not in ("admin", "service"):
         raise HTTPException(status_code=403, detail="无权限")
     async with engine.begin() as conn:
+        # 获取设备ID
         device_row = (await conn.execute(
             text("SELECT id FROM devices WHERE device_sn=:sn"),
             {"sn": data.device_sn}
@@ -1579,6 +1580,8 @@ async def confirm_alarm_by_sn_and_code(
         if not device_row:
             raise HTTPException(status_code=404, detail="设备不存在")
         device_id = device_row["id"]
+
+        # 更新 confirmed_at 和 confirmed_by
         result = await conn.execute(
             text("""
                 UPDATE alarms
@@ -1588,4 +1591,59 @@ async def confirm_alarm_by_sn_and_code(
             """),
             {"device_id": device_id, "code": data.code, "by": user["username"]}
         )
+
+        # 查询 critical 且 cleared 的报警
+        critical_cleared_alarms = await conn.execute(
+            text("""
+                SELECT *
+                FROM alarms
+                WHERE device_id = :device_id AND code = :code
+                AND level = 'critical' AND status = 'cleared'
+            """),
+            {"device_id": device_id, "code": data.code}
+        )
+        rows = critical_cleared_alarms.mappings().all()
+
+        # 将符合条件的报警归档到 alarm_history
+        for row in rows:
+            await conn.execute(
+                text("""
+                    INSERT INTO alarm_history (
+                        device_id, alarm_type, code, level, extra, status,
+                        first_triggered_at, last_triggered_at, repeat_count, remark,
+                        confirmed_at, confirmed_by, cleared_at, cleared_by, archived_at, duration
+                    ) VALUES (
+                        :device_id, :alarm_type, :code, :level, :extra, :status,
+                        :first_triggered_at, :last_triggered_at, :repeat_count, :remark,
+                        :confirmed_at, :confirmed_by, :cleared_at, :cleared_by, now(),
+                        EXTRACT(EPOCH FROM (:cleared_at - :first_triggered_at))::BIGINT
+                    )
+                """),
+                {
+                    "device_id": row["device_id"],
+                    "alarm_type": row["alarm_type"],
+                    "code": row["code"],
+                    "level": row["level"],
+                    "extra": row["extra"],
+                    "status": row["status"],
+                    "first_triggered_at": row["first_triggered_at"],
+                    "last_triggered_at": row["last_triggered_at"],
+                    "repeat_count": row["repeat_count"],
+                    "remark": row["remark"],
+                    "confirmed_at": row["confirmed_at"],
+                    "confirmed_by": row["confirmed_by"],
+                    "cleared_at": row["cleared_at"],
+                    "cleared_by": row["cleared_by"],
+                }
+            )
+
+            # 删除已归档的报警
+            await conn.execute(
+                text("""
+                    DELETE FROM alarms
+                    WHERE id = :id
+                """),
+                {"id": row["id"]}
+            )
+
     return {"msg": f"已确认设备 {data.device_sn} code={data.code} 的所有报警", "confirmed_count": result.rowcount}
