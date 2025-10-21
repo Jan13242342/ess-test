@@ -1318,7 +1318,7 @@ async def get_rpc_history(
     return {"items": items, "page": page, "page_size": page_size, "total": total}
     
     
-    async def cleanup_alarm_history():
+async def cleanup_alarm_history():
     """每周一凌晨2点分批清理1年前的历史报警记录，每批最多500条，并写入操作日志"""
     while True:
         now = datetime.now()
