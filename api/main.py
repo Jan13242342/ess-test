@@ -1619,6 +1619,9 @@ async def confirm_alarm_by_sn_and_code(
             # 将 extra 转换为 JSON 字符串
             extra = json.dumps(row["extra"]) if isinstance(row["extra"], dict) else row["extra"]
 
+            # 将 duration 转换为 PostgreSQL INTERVAL 格式
+            duration_interval = f"{duration} seconds" if duration else None
+
             await conn.execute(
                 text("""
                     INSERT INTO alarm_history (
@@ -1628,7 +1631,7 @@ async def confirm_alarm_by_sn_and_code(
                     ) VALUES (
                         :device_id, :alarm_type, :code, :level, :extra, :status,
                         :first_triggered_at, :last_triggered_at, :repeat_count, :remark,
-                        :confirmed_at, :confirmed_by, :cleared_at, :cleared_by, now(), :duration::INTERVAL
+                        :confirmed_at, :confirmed_by, :cleared_at, :cleared_by, now(), :duration
                     )
                 """),
                 {
@@ -1646,7 +1649,7 @@ async def confirm_alarm_by_sn_and_code(
                     "confirmed_by": row["confirmed_by"],
                     "cleared_at": row["cleared_at"],
                     "cleared_by": row["cleared_by"],
-                    "duration": f"{duration} seconds",  # 转换为 INTERVAL 格式
+                    "duration": duration_interval,  # 直接传递字符串格式的 INTERVAL
                 }
             )
 
