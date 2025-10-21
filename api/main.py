@@ -1060,43 +1060,6 @@ async def list_all_alarms(
 
 from pydantic import BaseModel
 
-class AlarmActionRequest(BaseModel):
-    alarm_id: int
-
-# 确认报警
-@app.post(
-    "/api/v1/alarms/admin/confirm",
-    tags=["管理员/客服 | Admin/Service"],
-    summary="确认报警 | Confirm Alarm",
-    description="管理员/客服确认报警（只操作当前报警表，历史报警不能确认）。"
-)
-async def confirm_alarm(
-    data: AlarmActionRequest,
-    user=Depends(get_current_user)
-):
-    if user["role"] not in ("admin", "service"):
-        raise HTTPException(status_code=403, detail="无权限")
-    async with engine.begin() as conn:
-        # 只允许操作当前报警表
-        result = await conn.execute(
-            text("SELECT * FROM alarms WHERE id=:id"),
-            {"id": data.alarm_id}
-        )
-        alarm = result.first()
-        if not alarm:
-            raise HTTPException(status_code=404, detail="报警不存在")
-        if alarm.status == "confirmed":
-            return {"msg": "已确认"}
-        await conn.execute(
-            text("""
-                UPDATE alarms
-                SET status='confirmed', confirmed_at=now(), confirmed_by=:by
-                WHERE id=:id
-            """),
-            {"id": data.alarm_id, "by": user["username"]}
-        )
-    return {"msg": "确认成功"}
-
 
 
 class AlarmBatchConfirmByCodeRequest(BaseModel):
@@ -1654,3 +1617,37 @@ async def admin_clear_all_rpc_log(
             }
         )
     return {"msg": "所有RPC日志已清除", "deleted_count": total_deleted}
+
+class AlarmConfirmBySNAndCodeRequest(BaseModel):
+    device_sn: str
+    code: str
+
+@app.post(
+    "/api/v1/alarms/admin/confirm",
+    tags=["管理员/客服 | Admin/Service"],
+    summary="按设备SN和code确认报警 | Confirm Alarms By Device SN and Code",
+    description="管理员/客服按设备SN和code确认所有未确认的报警（只操作当前报警表，历史报警不能确认）。"
+)
+async def confirm_alarm_by_sn_and_code(
+    data: AlarmConfirmBySNAndCodeRequest,
+    user=Depends(get_current_user)
+):
+    if user["role"] not in ("admin", "service"):
+        raise HTTPException(status_code=403, detail="无权限")
+    async with engine.begin() as conn:
+        device_row = (await conn.execute(
+            text("SELECT id FROM devices WHERE device_sn=:sn"),
+            {"sn": data.device_sn}
+        )).mappings().first()
+        if not device_row:
+            raise HTTPException(status_code=404, detail="设备不存在")
+        device_id = device_row["id"]
+        result = await conn.execute(
+            text("""
+                UPDATE alarms
+                SET status='confirmed', confirmed_at=now(), confirmed_by=:by
+                WHERE device_id = :device_id AND code = :code AND status != 'confirmed'
+            """),
+            {"device_id": device_id, "code": data.code, "by": user["username"]}
+        )
+    return {"msg": f"已确认设备 {data.device_sn} code={data.code} 的所有报警", "confirmed_count": result.rowcount}
