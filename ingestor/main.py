@@ -5,6 +5,7 @@ from psycopg2.extras import execute_batch
 from dotenv import load_dotenv, find_dotenv
 from queue import Queue, Empty
 from threading import Event, Thread
+import dateutil.parser
 
 def log(*args, **kwargs):
     print(time.strftime("[%Y-%m-%d %H:%M:%S]"), *args, flush=True, **kwargs)
@@ -276,13 +277,16 @@ def on_message(client, userdata, msg):
             if should_archive:
                 try:
                     with psycopg2.connect(PG_DSN) as conn:
-                        with conn.cursor() as cur:
+                        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                             cur.execute(
                                 "SELECT * FROM alarms WHERE device_id=%s AND alarm_type=%s AND code=%s AND status!='cleared' ORDER BY last_triggered_at DESC LIMIT 1",
                                 (alarm["device_id"], alarm["alarm_type"], alarm["code"])
                             )
                             row = cur.fetchone()
                             if row:
+                                cleared_at = parse_dt(alarm["cleared_at"])
+                                first_triggered_at = parse_dt(row["first_triggered_at"])
+                                duration = (cleared_at - first_triggered_at) if cleared_at and first_triggered_at else None
                                 cur.execute(
                                     """
                                     INSERT INTO alarm_history (
@@ -296,16 +300,16 @@ def on_message(client, userdata, msg):
                                     )
                                     """,
                                     (
-                                        row[1], row[2], row[3], row[4],
-                                        json.dumps(row[5]) if isinstance(row[5], dict) else row[5],  # 修正extra
+                                        row["device_id"], row["alarm_type"], row["code"], row["level"],
+                                        json.dumps(row["extra"]) if isinstance(row["extra"], dict) else row["extra"],
                                         "cleared",
-                                        row[7], row[8], row[9], row[10],
-                                        row[11], row[12], alarm["cleared_at"], alarm["cleared_by"],
-                                        (alarm["cleared_at"] and row[7] and (alarm["cleared_at"] - row[7])) or None
+                                        row["first_triggered_at"], row["last_triggered_at"], row["repeat_count"], row["remark"],
+                                        row["confirmed_at"], row["confirmed_by"], alarm["cleared_at"], alarm["cleared_by"],
+                                        duration
                                     )
                                 )
                                 cur.execute(
-                                    "DELETE FROM alarms WHERE id=%s", (row[0],)
+                                    "DELETE FROM alarms WHERE id=%s", (row["id"],)
                                 )
                                 conn.commit()
                 except Exception as e:
