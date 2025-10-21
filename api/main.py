@@ -1315,7 +1315,10 @@ async def get_rpc_history(
         """)
         rows = (await conn.execute(query_sql, {**params, "limit": page_size, "offset": offset})).mappings().all()
     items = [dict(row) for row in rows]
-    return {"items": items, "page": page, "page_size": page_size, "totalasync def cleanup_alarm_history():
+    return {"items": items, "page": page, "page_size": page_size, "total": total}
+    
+    
+    async def cleanup_alarm_history():
     """每周一凌晨2点分批清理1年前的历史报警记录，每批最多500条，并写入操作日志"""
     while True:
         now = datetime.now()
