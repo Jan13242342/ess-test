@@ -54,8 +54,7 @@ def gen_history_payload(device_id: int, ts: str) -> dict:
         "grid_wh_total": rnd(-20000, 20000)  # 新增，允许正负
     }
 
-def gen_alarm_payload(device_id: int) -> dict:
-    # 每个 code 只对应一个固定的 level
+def gen_alarm_payload(device_id: int, status: str) -> dict:
     code_level_map = {
         1001: "critical",
         2002: "major",
@@ -71,7 +70,7 @@ def gen_alarm_payload(device_id: int) -> dict:
         "code": code,
         "level": level,
         "extra": {"soc": rnd(0, 100), "note": "test alarm"},
-        "status": "active",
+        "status": status,
         "remark": f"测试报警 device {device_id}"
     }
 
@@ -120,14 +119,24 @@ def device_worker(device_id, interval=2, history_interval=300, alarm_interval=90
                         break
                     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] device_id={device_id} sent history to {history_topic}")
                     last_history = time.time()
-                # 定时发送报警数据
+                # 定时发送报警数据（先active再cleared）
                 if time.time() - last_alarm >= alarm_interval:
-                    alarm_payload = gen_alarm_payload(device_id)
-                    alarm_result = client.publish(alarm_topic, json.dumps(alarm_payload), qos=MQTT_QOS)
-                    if alarm_result.rc != 0:
-                        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] device_id={device_id} alarm publish失败: {alarm_result.rc}")
+                    # 先发送active
+                    alarm_payload_active = gen_alarm_payload(device_id, "active")
+                    alarm_result_active = client.publish(alarm_topic, json.dumps(alarm_payload_active), qos=MQTT_QOS)
+                    if alarm_result_active.rc != 0:
+                        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] device_id={device_id} alarm(active) publish失败: {alarm_result_active.rc}")
                         break
-                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] device_id={device_id} sent alarm to {alarm_topic}: {alarm_payload}")
+                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] device_id={device_id} sent alarm(active) to {alarm_topic}: {alarm_payload_active}")
+                    time.sleep(1)  # 可适当延迟，确保active已入库
+                    # 再发送cleared
+                    alarm_payload_cleared = alarm_payload_active.copy()
+                    alarm_payload_cleared["status"] = "cleared"
+                    alarm_result_cleared = client.publish(alarm_topic, json.dumps(alarm_payload_cleared), qos=MQTT_QOS)
+                    if alarm_result_cleared.rc != 0:
+                        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] device_id={device_id} alarm(cleared) publish失败: {alarm_result_cleared.rc}")
+                        break
+                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] device_id={device_id} sent alarm(cleared) to {alarm_topic}: {alarm_payload_cleared}")
                     last_alarm = time.time()
                 # 定时发送参数数据（新版para结构）
                 if time.time() - last_para >= para_interval:

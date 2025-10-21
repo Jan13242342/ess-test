@@ -249,7 +249,7 @@ def on_message(client, userdata, msg):
             alarm = {
                 "device_id": int(sn),
                 "alarm_type": payload.get("alarm_type", "unknown"),
-                "code": payload.get("code", ""),
+                "code": int(payload.get("code", 0)),  # 强制转int，确保类型一致
                 "level": payload.get("level", "info"),
                 "extra": json.dumps(payload.get("extra", {})),
                 "status": payload.get("status", "active"),

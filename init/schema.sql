@@ -226,7 +226,7 @@ CREATE TABLE IF NOT EXISTS alarms (
   id BIGSERIAL PRIMARY KEY,                        
   device_id BIGINT REFERENCES devices(id) ON DELETE SET NULL, 
   alarm_type TEXT NOT NULL,                        
-  code TEXT NOT NULL,                              
+  code INTEGER NOT NULL,        -- 这里改为 INTEGER
   level TEXT NOT NULL DEFAULT 'info',              
   extra JSONB,                                     
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'confirmed', 'cleared')), 
@@ -251,7 +251,7 @@ CREATE TABLE IF NOT EXISTS alarm_history (
   id BIGSERIAL PRIMARY KEY,                        
   device_id BIGINT,                                
   alarm_type TEXT NOT NULL,                        
-  code TEXT NOT NULL,                              
+  code INTEGER NOT NULL,        -- 这里改为 INTEGER
   level TEXT NOT NULL,                             
   extra JSONB,                                     
   status TEXT NOT NULL CHECK (status IN ('active', 'confirmed', 'cleared')), 

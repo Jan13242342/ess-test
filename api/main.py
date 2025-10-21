@@ -859,7 +859,7 @@ class AlarmItem(BaseModel):
     alarm_id: int = Field(..., alias="alarm_id")
     device_id: Optional[int]
     alarm_type: str
-    code: str
+    code: int
     level: str
     extra: Optional[Any]
     status: str
@@ -1063,7 +1063,7 @@ from pydantic import BaseModel
 
 
 class AlarmBatchConfirmByCodeRequest(BaseModel):
-    code: str
+    code: int
 
 @app.post(
     "/api/v1/alarms/admin/batch_confirm",
@@ -1556,7 +1556,7 @@ async def admin_clear_all_rpc_log(
 
 class AlarmConfirmBySNAndCodeRequest(BaseModel):
     device_sn: str
-    code: str
+    code: int
 
 @app.post(
     "/api/v1/alarms/admin/confirm",
