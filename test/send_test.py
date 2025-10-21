@@ -55,14 +55,21 @@ def gen_history_payload(device_id: int, ts: str) -> dict:
     }
 
 def gen_alarm_payload(device_id: int) -> dict:
-    # 随机生成一个报警类型和数字代号
+    # 每个 code 只对应一个固定的 level
+    code_level_map = {
+        1001: "critical",
+        2002: "major",
+        3003: "minor",
+        4004: "info"
+    }
     alarm_types = ["system", "business", "communication", "hardware"]
-    codes = [1001, 2002, 3003, 4004]  # 数字代号
-    levels = ["critical", "major", "minor", "info"]  # 新的报警等级
+    codes = list(code_level_map.keys())
+    code = random.choice(codes)
+    level = code_level_map[code]
     return {
         "alarm_type": random.choice(alarm_types),
-        "code": random.choice(codes),         # 数字
-        "level": random.choice(levels),
+        "code": code,
+        "level": level,
         "extra": {"soc": rnd(0, 100), "note": "test alarm"},
         "status": "active",
         "remark": f"测试报警 device {device_id}"

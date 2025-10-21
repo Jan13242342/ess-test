@@ -1097,38 +1097,7 @@ async def confirm_alarm(
         )
     return {"msg": "确认成功"}
 
-# 清除报警
-@app.post(
-    "/api/v1/alarms/admin/clear",
-    tags=["管理员/客服 | Admin/Service"],
-    summary="清除报警 | Clear Alarm",
-    description="管理员/客服清除报警（只操作当前报警表，历史报警不能清除）。"
-)
-async def clear_alarm(
-    data: AlarmActionRequest,
-    user=Depends(get_current_user)
-):
-    if user["role"] not in ("admin", "service"):
-        raise HTTPException(status_code=403, detail="无权限")
-    async with engine.begin() as conn:
-        result = await conn.execute(
-            text("SELECT * FROM alarms WHERE id=:id"),
-            {"id": data.alarm_id}
-        )
-        alarm = result.first()
-        if not alarm:
-            raise HTTPException(status_code=404, detail="报警不存在")
-        if alarm.status == "cleared":
-            return {"msg": "已清除"}
-        await conn.execute(
-            text("""
-                UPDATE alarms
-                SET status='cleared', cleared_at=now(), cleared_by=:by
-                WHERE id=:id
-            """),
-            {"id": data.alarm_id, "by": user["username"]}
-        )
-    return {"msg": "清除成功"}
+
 
 class AlarmBatchActionRequest(BaseModel):
     alarm_ids: List[int]
@@ -1159,31 +1128,31 @@ async def batch_confirm_alarm(
         )
     return {"msg": "批量确认成功"}
 
-# 批量清除报警
+class AlarmBatchConfirmByCodeRequest(BaseModel):
+    code: str
+
 @app.post(
-    "/api/v1/alarms/admin/batch_clear",
+    "/api/v1/alarms/admin/batch_confirm",
     tags=["管理员/客服 | Admin/Service"],
-    summary="批量清除报警 | Batch Clear Alarms",
-    description="管理员/客服批量清除报警（只操作当前报警表，历史报警不能清除）。"
+    summary="按code批量确认报警 | Batch Confirm Alarms By Code",
+    description="管理员/客服按报警code批量确认所有未确认的报警（只操作当前报警表，历史报警不能确认）。"
 )
-async def batch_clear_alarm(
-    data: AlarmBatchActionRequest,
+async def batch_confirm_alarm_by_code(
+    data: AlarmBatchConfirmByCodeRequest,
     user=Depends(get_current_user)
 ):
     if user["role"] not in ("admin", "service"):
         raise HTTPException(status_code=403, detail="无权限")
-    if not data.alarm_ids:
-        raise HTTPException(status_code=400, detail="alarm_ids 不能为空")
     async with engine.begin() as conn:
-        await conn.execute(
+        result = await conn.execute(
             text("""
                 UPDATE alarms
-                SET status='cleared', cleared_at=now(), cleared_by=:by
-                WHERE id = ANY(:ids) AND status != 'cleared'
+                SET status='confirmed', confirmed_at=now(), confirmed_by=:by
+                WHERE code = :code AND status != 'confirmed'
             """),
-            {"ids": data.alarm_ids, "by": user["username"]}
+            {"code": data.code, "by": user["username"]}
         )
-    return {"msg": "批量清除成功"}
+    return {"msg": f"已确认所有 code={data.code} 的报警", "confirmed_count": result.rowcount}
 
 @app.get(
     "/api/v1/alarms/unhandled_count",
@@ -1473,3 +1442,29 @@ async def change_user_password(
         )
         await session.commit()
     return {"msg": "密码修改成功", "msg_en": "Password changed successfully"}
+
+class AlarmBatchClearByCodeRequest(BaseModel):
+    code: str
+
+@app.post(
+    "/api/v1/alarms/admin/batch_clear",
+    tags=["管理员/客服 | Admin/Service"],
+    summary="按code批量清除报警 | Batch Clear Alarms By Code",
+    description="管理员/客服按报警code批量清除所有未清除的报警（只操作当前报警表，历史报警不能清除）。"
+)
+async def batch_clear_alarm_by_code(
+    data: AlarmBatchClearByCodeRequest,
+    user=Depends(get_current_user)
+):
+    if user["role"] not in ("admin", "service"):
+        raise HTTPException(status_code=403, detail="无权限")
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("""
+                UPDATE alarms
+                SET status='cleared', cleared_at=now(), cleared_by=:by
+                WHERE code = :code AND status != 'cleared'
+            """),
+            {"code": data.code, "by": user["username"]}
+        )
+    return {"msg": f"已清除所有 code={data.code} 的报警", "cleared_count": result.rowcount}
