@@ -258,9 +258,9 @@ def on_message(client, userdata, msg):
                 "last_triggered_at": now,
                 "repeat_count": 1,
                 "remark": payload.get("remark", None),
-                "confirmed_at": payload.get("confirmed_at", None),
+                "confirmed_at": payload.get("confirmed_at") or (now if payload.get("status") == "confirmed" or payload.get("confirmed_by") else None),
                 "confirmed_by": payload.get("confirmed_by", None),
-                "cleared_at": payload.get("cleared_at", None),
+                "cleared_at": payload.get("cleared_at") or (now if payload.get("status") == "cleared" else None),
                 "cleared_by": payload.get("cleared_by", None),
             }
             # 归档逻辑调整
@@ -590,9 +590,9 @@ def on_message(client, userdata, msg):
                 "last_triggered_at": now,
                 "repeat_count": 1,
                 "remark": payload.get("remark", None),
-                "confirmed_at": payload.get("confirmed_at", None),
+                "confirmed_at": payload.get("confirmed_at") or (now if payload.get("status") == "confirmed" or payload.get("confirmed_by") else None),
                 "confirmed_by": payload.get("confirmed_by", None),
-                "cleared_at": payload.get("cleared_at", None),
+                "cleared_at": payload.get("cleared_at") or (now if payload.get("status") == "cleared" else None),
                 "cleared_by": payload.get("cleared_by", None),
             }
             # 归档逻辑调整

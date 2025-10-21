@@ -132,6 +132,7 @@ def device_worker(device_id, interval=2, history_interval=300, alarm_interval=90
                     # 再发送cleared
                     alarm_payload_cleared = alarm_payload_active.copy()
                     alarm_payload_cleared["status"] = "cleared"
+                    alarm_payload_cleared["cleared_by"] = "device"
                     alarm_result_cleared = client.publish(alarm_topic, json.dumps(alarm_payload_cleared), qos=MQTT_QOS)
                     if alarm_result_cleared.rc != 0:
                         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] device_id={device_id} alarm(cleared) publish失败: {alarm_result_cleared.rc}")
