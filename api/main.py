@@ -1628,7 +1628,7 @@ async def confirm_alarm_by_sn_and_code(
                     ) VALUES (
                         :device_id, :alarm_type, :code, :level, :extra, :status,
                         :first_triggered_at, :last_triggered_at, :repeat_count, :remark,
-                        :confirmed_at, :confirmed_by, :cleared_at, :cleared_by, now(), :duration
+                        :confirmed_at, :confirmed_by, :cleared_at, :cleared_by, now(), :duration::INTERVAL
                     )
                 """),
                 {
@@ -1646,7 +1646,7 @@ async def confirm_alarm_by_sn_and_code(
                     "confirmed_by": row["confirmed_by"],
                     "cleared_at": row["cleared_at"],
                     "cleared_by": row["cleared_by"],
-                    "duration": duration,
+                    "duration": f"{duration} seconds",  # 转换为 INTERVAL 格式
                 }
             )
 
