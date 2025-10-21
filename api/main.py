@@ -1099,35 +1099,6 @@ async def confirm_alarm(
 
 
 
-class AlarmBatchActionRequest(BaseModel):
-    alarm_ids: List[int]
-
-# 批量确认报警
-@app.post(
-    "/api/v1/alarms/admin/batch_confirm",
-    tags=["管理员/客服 | Admin/Service"],
-    summary="批量确认报警 | Batch Confirm Alarms",
-    description="管理员/客服批量确认报警（只操作当前报警表，历史报警不能确认）。"
-)
-async def batch_confirm_alarm(
-    data: AlarmBatchActionRequest,
-    user=Depends(get_current_user)
-):
-    if user["role"] not in ("admin", "service"):
-        raise HTTPException(status_code=403, detail="无权限")
-    if not data.alarm_ids:
-        raise HTTPException(status_code=400, detail="alarm_ids 不能为空")
-    async with engine.begin() as conn:
-        await conn.execute(
-            text("""
-                UPDATE alarms
-                SET status='confirmed', confirmed_at=now(), confirmed_by=:by
-                WHERE id = ANY(:ids) AND status != 'confirmed'
-            """),
-            {"ids": data.alarm_ids, "by": user["username"]}
-        )
-    return {"msg": "批量确认成功"}
-
 class AlarmBatchConfirmByCodeRequest(BaseModel):
     code: str
 
