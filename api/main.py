@@ -1616,7 +1616,7 @@ async def confirm_alarm_by_sn_and_code(
                         :device_id, :alarm_type, :code, :level, :extra, :status,
                         :first_triggered_at, :last_triggered_at, :repeat_count, :remark,
                         :confirmed_at, :confirmed_by, :cleared_at, :cleared_by, now(),
-                        EXTRACT(EPOCH FROM (:cleared_at - :first_triggered_at))::BIGINT
+                        EXTRACT(EPOCH FROM (:cleared_at::TIMESTAMP - :first_triggered_at::TIMESTAMP))::BIGINT
                     )
                 """),
                 {
