@@ -1347,6 +1347,30 @@ async def cleanup_rpc_log_by_sn(
         "device_sn": device_sn
     }
 
+@app.delete(
+    "/api/v1/admin/rpc_log/clear_all",
+    tags=["管理员 | Admin Only"],
+    summary="管理员清除所有RPC日志（分批）",
+    description="只有管理员可以分批清除所有RPC日志，客服无权限。"
+)
+async def admin_clear_all_rpc_log(
+    user=Depends(get_current_user)
+):
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="只有管理员可以清除所有RPC日志")
+    batch_size = 5000
+    total_deleted = 0
+    async with engine.begin() as conn:
+        while True:
+            result = await conn.execute(
+                text(f"DELETE FROM device_rpc_change_log WHERE id IN (SELECT id FROM device_rpc_change_log LIMIT {batch_size})")
+            )
+            deleted = result.rowcount
+            total_deleted += deleted
+            if deleted < batch_size:
+                break
+    return {"msg": "所有RPC日志已清除", "deleted_count": total_deleted}
+
 async def cleanup_alarm_history():
     """每天凌晨2点分批清理1年前的历史报警记录，每批最多500条"""
     while True:
@@ -1506,50 +1530,7 @@ async def batch_clear_alarm_by_code(
             cleared_count += 1
     return {"msg": f"已清除并归档所有 code={data.code} 的报警", "cleared_count": cleared_count}
 
-class AdminDeleteAlarmHistoryRequest(BaseModel):
-    alarm_id: int
 
-@app.delete(
-    "/api/v1/admin/alarm_history/delete",
-    tags=["管理员 | Admin Only"],
-    summary="管理员删除单条历史报警记录",
-    description="只有管理员可以删除单条历史报警记录，客服无权限。"
-)
-async def admin_delete_alarm_history(
-    data: AdminDeleteAlarmHistoryRequest,
-    user=Depends(get_current_user)
-):
-    if user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="只有管理员可以删除历史报警记录")
-    async with engine.begin() as conn:
-        result = await conn.execute(
-            text("DELETE FROM alarm_history WHERE id=:id"),
-            {"id": data.alarm_id}
-        )
-    return {"msg": "历史报警记录已删除", "deleted_count": result.rowcount}
-
-
-class AdminDeleteRPCLogRequest(BaseModel):
-    rpc_log_id: int
-
-@app.delete(
-    "/api/v1/admin/rpc_log/delete",
-    tags=["管理员 | Admin Only"],
-    summary="管理员删除单条RPC日志",
-    description="只有管理员可以删除单条RPC日志，客服无权限。"
-)
-async def admin_delete_rpc_log(
-    data: AdminDeleteRPCLogRequest,
-    user=Depends(get_current_user)
-):
-    if user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="只有管理员可以删除RPC日志")
-    async with engine.begin() as conn:
-        result = await conn.execute(
-            text("DELETE FROM device_rpc_change_log WHERE id=:id"),
-            {"id": data.rpc_log_id}
-        )
-    return {"msg": "RPC日志已删除", "deleted_count": result.rowcount}
 
 class AdminBatchDeleteAlarmHistoryBySNRequest(BaseModel):
     device_sn: str
@@ -1617,3 +1598,27 @@ async def admin_batch_delete_rpc_log_by_sn(
         "deleted_count": result.rowcount,
         "device_sn": data.device_sn
     }
+
+@app.delete(
+    "/api/v1/admin/alarm_history/clear_all",
+    tags=["管理员 | Admin Only"],
+    summary="管理员清除所有历史报警记录（分批）",
+    description="只有管理员可以分批清除所有历史报警记录，客服无权限。"
+)
+async def admin_clear_all_alarm_history(
+    user=Depends(get_current_user)
+):
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="只有管理员可以清除所有历史报警记录")
+    batch_size = 5000
+    total_deleted = 0
+    async with engine.begin() as conn:
+        while True:
+            result = await conn.execute(
+                text(f"DELETE FROM alarm_history WHERE id IN (SELECT id FROM alarm_history LIMIT {batch_size})")
+            )
+            deleted = result.rowcount
+            total_deleted += deleted
+            if deleted < batch_size:
+                break
+    return {"msg": "所有历史报警记录已清除", "deleted_count": total_deleted}
