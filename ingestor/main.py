@@ -165,12 +165,24 @@ def normalize_history(sn: str, payload: dict) -> dict:
 ALARM_TOPIC = os.getenv("MQTT_ALARM_TOPIC", "$share/ess-ingestor/devices/+/alarm")
 alarm_q: Queue[dict] = Queue(maxsize=QUEUE_MAXSIZE)
 
-ALARM_INSERT_SQL = """
+ALARM_UPSERT_SQL = """
 INSERT INTO alarms (
-  device_id, alarm_type, level, message, extra, status, created_at
+  device_id, alarm_type, code, level, extra, status,
+  first_triggered_at, last_triggered_at, repeat_count, remark,
+  confirmed_at, confirmed_by, cleared_at, cleared_by
 ) VALUES (
-  %(device_id)s, %(alarm_type)s, %(level)s, %(message)s, %(extra)s, %(status)s, now()
+  %(device_id)s, %(alarm_type)s, %(code)s, %(level)s, %(extra)s, %(status)s,
+  %(first_triggered_at)s, %(last_triggered_at)s, %(repeat_count)s, %(remark)s,
+  %(confirmed_at)s, %(confirmed_by)s, %(cleared_at)s, %(cleared_by)s
 )
+ON CONFLICT (device_id, alarm_type, code, status)
+DO UPDATE SET
+  last_triggered_at = EXCLUDED.last_triggered_at,
+  repeat_count = alarms.repeat_count + 1,
+  level = EXCLUDED.level,
+  extra = EXCLUDED.extra,
+  remark = EXCLUDED.remark
+;
 """
 
 # 新增 para topic 和队列
@@ -230,17 +242,74 @@ def on_message(client, userdata, msg):
             history_q.put(rec, block=False)
         elif msg.topic.endswith("/alarm"):
             sn = parse_alarm_device_id(msg.topic)
-            if not sn: return
+            if not sn:
+                return
             payload = json.loads(msg.payload.decode("utf-8"))
+            now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             alarm = {
                 "device_id": int(sn),
                 "alarm_type": payload.get("alarm_type", "unknown"),
+                "code": payload.get("code", ""),
                 "level": payload.get("level", "info"),
-                "message": payload.get("message", ""),
                 "extra": json.dumps(payload.get("extra", {})),
                 "status": payload.get("status", "active"),
+                "first_triggered_at": now,
+                "last_triggered_at": now,
+                "repeat_count": 1,
+                "remark": payload.get("remark", None),
+                "confirmed_at": payload.get("confirmed_at", None),
+                "confirmed_by": payload.get("confirmed_by", None),
+                "cleared_at": payload.get("cleared_at", None),
+                "cleared_by": payload.get("cleared_by", None),
             }
-            alarm_q.put(alarm, block=False)
+            # 归档逻辑调整
+            should_archive = False
+            if alarm["level"] == "critical":
+                # critical 级别，只有确认且清除才归档
+                if alarm["status"] == "cleared" and alarm["confirmed_at"]:
+                    should_archive = True
+            else:
+                # 其它级别，只要清除就归档
+                if alarm["status"] == "cleared":
+                    should_archive = True
+
+            if should_archive:
+                try:
+                    with psycopg2.connect(PG_DSN) as conn:
+                        with conn.cursor() as cur:
+                            cur.execute(
+                                "SELECT * FROM alarms WHERE device_id=%s AND alarm_type=%s AND code=%s AND status!='cleared' ORDER BY last_triggered_at DESC LIMIT 1",
+                                (alarm["device_id"], alarm["alarm_type"], alarm["code"])
+                            )
+                            row = cur.fetchone()
+                            if row:
+                                cur.execute(
+                                    """
+                                    INSERT INTO alarm_history (
+                                        device_id, alarm_type, code, level, extra, status,
+                                        first_triggered_at, last_triggered_at, repeat_count, remark,
+                                        confirmed_at, confirmed_by, cleared_at, cleared_by, archived_at, duration
+                                    ) VALUES (
+                                        %s, %s, %s, %s, %s, %s,
+                                        %s, %s, %s, %s,
+                                        %s, %s, %s, %s, now(), %s
+                                    )
+                                    """,
+                                    (
+                                        row[1], row[2], row[3], row[4], row[5], "cleared",
+                                        row[7], row[8], row[9], row[10],
+                                        row[11], row[12], alarm["cleared_at"], alarm["cleared_by"],
+                                        (alarm["cleared_at"] and row[7] and (alarm["cleared_at"] - row[7])) or None
+                                    )
+                                )
+                                cur.execute(
+                                    "DELETE FROM alarms WHERE id=%s", (row[0],)
+                                )
+                                conn.commit()
+                except Exception as e:
+                    log("[alarm archive] error:", e)
+            else:
+                alarm_q.put(alarm, block=False)
         elif msg.topic.endswith("/para"):
             sn = parse_para_device_id(msg.topic)
             if not sn: return
@@ -378,10 +447,9 @@ def alarm_flusher():
                     if batch:
                         try:
                             with conn.cursor() as cur:
-                                # 可选：ensure_devices_exist(cur, batch)
-                                execute_batch(cur, ALARM_INSERT_SQL, batch, page_size=1000)
+                                execute_batch(cur, ALARM_UPSERT_SQL, batch, page_size=1000)
                             conn.commit()
-                            log(f"[DB] insert alarm {len(batch)} rows")
+                            log(f"[DB] upsert alarm {len(batch)} rows")
                         except Exception as e:
                             log("[alarm_flusher] DB error:", e)
                             conn.rollback()

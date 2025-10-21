@@ -6,7 +6,7 @@ import json
 
 MQTT_HOST = "37.114.34.61"   # 改成你的MQTT服务器IP
 MQTT_PORT = 1883
-MQTT_QOS = 1
+MQTT_QOS = 0
 
 def build_topic(device_id) -> str:
     return f"devices/{device_id}/realtime"
@@ -55,15 +55,17 @@ def gen_history_payload(device_id: int, ts: str) -> dict:
     }
 
 def gen_alarm_payload(device_id: int) -> dict:
-    # 随机生成一个报警类型和级别
-    alarm_types = ["overvoltage", "offline", "low_soc", "system"]
-    levels = ["info", "warning", "critical", "fatal"]
+    # 随机生成一个报警类型和数字代号
+    alarm_types = ["system", "business", "communication", "hardware"]
+    codes = [1001, 2002, 3003, 4004]  # 数字代号
+    levels = ["critical", "major", "minor", "info"]  # 新的报警等级
     return {
         "alarm_type": random.choice(alarm_types),
+        "code": random.choice(codes),         # 数字
         "level": random.choice(levels),
-        "message": f"测试报警 device {device_id}",
         "extra": {"soc": rnd(0, 100), "note": "test alarm"},
-        "status": "active"
+        "status": "active",
+        "remark": f"测试报警 device {device_id}"
     }
 
 def gen_para_payload(device_id: int) -> dict:

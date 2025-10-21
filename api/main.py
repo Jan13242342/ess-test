@@ -766,12 +766,16 @@ class AlarmItem(BaseModel):
     alarm_id: int = Field(..., alias="alarm_id")
     device_id: Optional[int]
     alarm_type: str
+    code: str
     level: str
-    message: str
     extra: Optional[Any]
     status: str
-    created_at: datetime
+    first_triggered_at: datetime
+    last_triggered_at: datetime
+    repeat_count: int
+    remark: Optional[str]
     confirmed_at: Optional[datetime]
+    confirmed_by: Optional[str]
     cleared_at: Optional[datetime]
     cleared_by: Optional[str]
 
@@ -784,7 +788,7 @@ class AlarmListResponse(BaseModel):
     page_size: int
     total: int
 
-# 用户只能查自己设备报警
+# 查询当前报警（alarms）
 @app.get(
     "/api/v1/alarms/user",
     response_model=AlarmListResponse,
@@ -797,6 +801,7 @@ async def list_my_alarms(
     page_size: int = Query(20, ge=1, le=200),
     status: Optional[str] = Query(None),
     level: Optional[str] = Query(None),
+    code: Optional[str] = Query(None),
     user=Depends(get_current_user)
 ):
     if user["role"] in ("admin", "service"):
@@ -817,6 +822,9 @@ async def list_my_alarms(
     if level:
         where.append("level = :level")
         params["level"] = level
+    if code:
+        where.append("code = :code")
+        params["code"] = code
     cond = "WHERE " + " AND ".join(where)
     offset = (page - 1) * page_size
 
@@ -827,7 +835,7 @@ async def list_my_alarms(
             SELECT *
             FROM alarms
             {cond}
-            ORDER BY created_at DESC
+            ORDER BY first_triggered_at DESC
             LIMIT :limit OFFSET :offset
         """)
         rows = (await conn.execute(query_sql, {**params, "limit": page_size, "offset": offset})).mappings().all()
@@ -838,13 +846,71 @@ async def list_my_alarms(
             items.append(d)
     return {"items": items, "page": page, "page_size": page_size, "total": total}
 
-# 管理员/客服可查所有报警
+# 查询历史报警（alarm_history）
+@app.get(
+    "/api/v1/alarms/history",
+    response_model=AlarmListResponse,
+    tags=["用户 | User"],
+    summary="查询本人设备历史报警 | Query My Device Alarm History",
+    description="普通用户只能查询自己设备的历史报警。"
+)
+async def list_my_alarm_history(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    status: Optional[str] = Query(None),
+    level: Optional[str] = Query(None),
+    code: Optional[str] = Query(None),
+    user=Depends(get_current_user)
+):
+    if user["role"] in ("admin", "service"):
+        raise HTTPException(status_code=403, detail="管理员/客服请用专用接口")
+    async with engine.connect() as conn:
+        devices = (await conn.execute(
+            text("SELECT id FROM devices WHERE user_id=:uid"),
+            {"uid": user["user_id"]}
+        )).scalars().all()
+    if not devices:
+        return {"items": [], "page": page, "page_size": page_size, "total": 0}
+    placeholders = ",".join([f":id{i}" for i in range(len(devices))])
+    params = {f"id{i}": did for i, did in enumerate(devices)}
+    where = [f"device_id IN ({placeholders})"]
+    if status:
+        where.append("status = :status")
+        params["status"] = status
+    if level:
+        where.append("level = :level")
+        params["level"] = level
+    if code:
+        where.append("code = :code")
+        params["code"] = code
+    cond = "WHERE " + " AND ".join(where)
+    offset = (page - 1) * page_size
+
+    async with engine.connect() as conn:
+        count_sql = text(f"SELECT COUNT(*) FROM alarm_history {cond}")
+        total = (await conn.execute(count_sql, params)).scalar_one()
+        query_sql = text(f"""
+            SELECT *
+            FROM alarm_history
+            {cond}
+            ORDER BY first_triggered_at DESC
+            LIMIT :limit OFFSET :offset
+        """)
+        rows = (await conn.execute(query_sql, {**params, "limit": page_size, "offset": offset})).mappings().all()
+        items = []
+        for row in rows:
+            d = dict(row)
+            d["alarm_id"] = d.pop("id")
+            items.append(d)
+    return {"items": items, "page": page, "page_size": page_size, "total": total}
+
+# 管理员/客服可查所有报警（当前+历史，类似方式可加 device_sn、alarm_type 等筛选）
 @app.get(
     "/api/v1/alarms/admin",
     response_model=AlarmListResponse,
     tags=["管理员/客服 | Admin/Service"],
     summary="报警管理查询 | Query All Alarms (Admin/Service)",
-    description="管理员/客服可按设备序列号、状态、级别等筛选报警。"
+    description="管理员/客服可按设备序列号、状态、级别、code等筛选报警。"
 )
 async def list_all_alarms(
     page: int = Query(1, ge=1),
@@ -852,6 +918,8 @@ async def list_all_alarms(
     status: Optional[str] = Query(None),
     device_sn: Optional[str] = Query(None),
     level: Optional[str] = Query(None),
+    code: Optional[str] = Query(None),
+    alarm_type: Optional[str] = Query(None),
     user=Depends(get_current_user)
 ):
     if user["role"] not in ("admin", "service"):
@@ -869,6 +937,12 @@ async def list_all_alarms(
     if level:
         where.append("alarms.level = :level")
         params["level"] = level
+    if code:
+        where.append("alarms.code = :code")
+        params["code"] = code
+    if alarm_type:
+        where.append("alarms.alarm_type = :alarm_type")
+        params["alarm_type"] = alarm_type
     cond = "WHERE " + " AND ".join(where) if where else ""
     offset = (page - 1) * page_size
 
@@ -880,7 +954,7 @@ async def list_all_alarms(
             FROM alarms
             {join_sql}
             {cond}
-            ORDER BY alarms.created_at DESC
+            ORDER BY alarms.first_triggered_at DESC
             LIMIT :limit OFFSET :offset
         """)
         rows = (await conn.execute(query_sql, {**params, "limit": page_size, "offset": offset})).mappings().all()
@@ -891,14 +965,17 @@ async def list_all_alarms(
             items.append(d)
     return {"items": items, "page": page, "page_size": page_size, "total": total}
 
+from pydantic import BaseModel
+
 class AlarmActionRequest(BaseModel):
     alarm_id: int
 
+# 确认报警
 @app.post(
     "/api/v1/alarms/admin/confirm",
     tags=["管理员/客服 | Admin/Service"],
     summary="确认报警 | Confirm Alarm",
-    description="管理员/客服确认报警，将status设为confirmed并记录确认时间。",
+    description="管理员/客服确认报警（只操作当前报警表，历史报警不能确认）。"
 )
 async def confirm_alarm(
     data: AlarmActionRequest,
@@ -907,30 +984,32 @@ async def confirm_alarm(
     if user["role"] not in ("admin", "service"):
         raise HTTPException(status_code=403, detail="无权限")
     async with engine.begin() as conn:
+        # 只允许操作当前报警表
         result = await conn.execute(
-            text("SELECT status FROM alarms WHERE id=:id"),
+            text("SELECT * FROM alarms WHERE id=:id"),
             {"id": data.alarm_id}
         )
-        row = result.first()
-        if not row:
+        alarm = result.first()
+        if not alarm:
             raise HTTPException(status_code=404, detail="报警不存在")
-        if row.status == "confirmed":
-            return {"msg": "报警已确认", "msg_en": "Alarm already confirmed"}
+        if alarm.status == "confirmed":
+            return {"msg": "已确认"}
         await conn.execute(
             text("""
                 UPDATE alarms
-                SET status='confirmed', confirmed_at=now()
+                SET status='confirmed', confirmed_at=now(), confirmed_by=:by
                 WHERE id=:id
             """),
-            {"id": data.alarm_id}
+            {"id": data.alarm_id, "by": user["username"]}
         )
-    return {"msg": "报警已确认", "msg_en": "Alarm confirmed"}
+    return {"msg": "确认成功"}
 
+# 清除报警
 @app.post(
     "/api/v1/alarms/admin/clear",
     tags=["管理员/客服 | Admin/Service"],
     summary="清除报警 | Clear Alarm",
-    description="管理员/客服清除报警，将status设为cleared并记录清除时间和操作人。",
+    description="管理员/客服清除报警（只操作当前报警表，历史报警不能清除）。"
 )
 async def clear_alarm(
     data: AlarmActionRequest,
@@ -940,14 +1019,14 @@ async def clear_alarm(
         raise HTTPException(status_code=403, detail="无权限")
     async with engine.begin() as conn:
         result = await conn.execute(
-            text("SELECT status FROM alarms WHERE id=:id"),
+            text("SELECT * FROM alarms WHERE id=:id"),
             {"id": data.alarm_id}
         )
-        row = result.first()
-        if not row:
+        alarm = result.first()
+        if not alarm:
             raise HTTPException(status_code=404, detail="报警不存在")
-        if row.status == "cleared":
-            return {"msg": "报警已清除", "msg_en": "Alarm already cleared"}
+        if alarm.status == "cleared":
+            return {"msg": "已清除"}
         await conn.execute(
             text("""
                 UPDATE alarms
@@ -956,16 +1035,17 @@ async def clear_alarm(
             """),
             {"id": data.alarm_id, "by": user["username"]}
         )
-    return {"msg": "报警已清除", "msg_en": "Alarm cleared"}
+    return {"msg": "清除成功"}
 
 class AlarmBatchActionRequest(BaseModel):
     alarm_ids: List[int]
 
+# 批量确认报警
 @app.post(
     "/api/v1/alarms/admin/batch_confirm",
     tags=["管理员/客服 | Admin/Service"],
     summary="批量确认报警 | Batch Confirm Alarms",
-    description="管理员/客服批量确认报警，将多条报警status设为confirmed并记录确认时间。"
+    description="管理员/客服批量确认报警（只操作当前报警表，历史报警不能确认）。"
 )
 async def batch_confirm_alarm(
     data: AlarmBatchActionRequest,
@@ -974,25 +1054,24 @@ async def batch_confirm_alarm(
     if user["role"] not in ("admin", "service"):
         raise HTTPException(status_code=403, detail="无权限")
     if not data.alarm_ids:
-        raise HTTPException(status_code=400, detail="alarm_ids不能为空")
-    placeholders = ",".join([f":id{i}" for i in range(len(data.alarm_ids))])
-    params = {f"id{i}": aid for i, aid in enumerate(data.alarm_ids)}
+        raise HTTPException(status_code=400, detail="alarm_ids 不能为空")
     async with engine.begin() as conn:
         await conn.execute(
-            text(f"""
+            text("""
                 UPDATE alarms
-                SET status='confirmed', confirmed_at=now()
-                WHERE id IN ({placeholders}) AND status != 'confirmed'
+                SET status='confirmed', confirmed_at=now(), confirmed_by=:by
+                WHERE id = ANY(:ids) AND status != 'confirmed'
             """),
-            params
+            {"ids": data.alarm_ids, "by": user["username"]}
         )
-    return {"msg": "批量确认成功", "msg_en": "Batch confirm success"}
+    return {"msg": "批量确认成功"}
 
+# 批量清除报警
 @app.post(
     "/api/v1/alarms/admin/batch_clear",
     tags=["管理员/客服 | Admin/Service"],
     summary="批量清除报警 | Batch Clear Alarms",
-    description="管理员/客服批量清除报警，将多条报警status设为cleared并记录清除时间和操作人。"
+    description="管理员/客服批量清除报警（只操作当前报警表，历史报警不能清除）。"
 )
 async def batch_clear_alarm(
     data: AlarmBatchActionRequest,
@@ -1001,420 +1080,24 @@ async def batch_clear_alarm(
     if user["role"] not in ("admin", "service"):
         raise HTTPException(status_code=403, detail="无权限")
     if not data.alarm_ids:
-        raise HTTPException(status_code=400, detail="alarm_ids不能为空")
-    placeholders = ",".join([f":id{i}" for i in range(len(data.alarm_ids))])
-    params = {f"id{i}": aid for i, aid in enumerate(data.alarm_ids)}
-    params["by"] = user["username"]
+        raise HTTPException(status_code=400, detail="alarm_ids 不能为空")
     async with engine.begin() as conn:
-        await conn.execute(
-            text(f"""
-                UPDATE alarms
-                SET status='cleared', cleared_at=now(), cleared_by=:by
-                WHERE id IN ({placeholders}) AND status != 'cleared'
-            """),
-            params
-        )
-    return {"msg": "批量清除成功", "msg_en": "Batch clear success"}
-
-class DevicePara(BaseModel):
-    device_id: int
-    para: dict  # 所有参数都放在 para 字段
-    updated_at: datetime
-
-@app.get(
-    "/api/v1/device/para",
-    response_model=DevicePara,
-    tags=["管理员/客服 | Admin/Service"],
-    summary="查询设备参数（仅管理员/客服） | Query Device Parameters (Admin/Service Only)",
-    description="""
-只有管理员和客服可以查询设备参数。
-
-Only admin and service staff can query device parameters.
-"""
-)
-async def get_device_para(
-    device_sn: str = Query(..., description="设备序列号 | Device Serial Number"),
-    user=Depends(get_current_user)
-):
-    if user["role"] not in ("admin", "service"):
-        raise HTTPException(status_code=403, detail="只有管理员和客服可以查询设备参数")
-    async with engine.connect() as conn:
-        device_row = (await conn.execute(
-            text("SELECT id FROM devices WHERE device_sn=:sn"),
-            {"sn": device_sn}
-        )).mappings().first()
-        if not device_row:
-            raise HTTPException(status_code=404, detail="设备不存在")
-        device_id = device_row["id"]
-        row = (await conn.execute(
-            text("SELECT device_id, para, updated_at FROM device_para WHERE device_id=:id"),
-            {"id": device_id}
-        )).mappings().first()
-    if not row:
-        raise HTTPException(status_code=404, detail="设备参数不存在")
-    # para字段自动转为dict返回
-    return row
-
-class RPCChangeRequest(BaseModel):
-    device_sn: str
-    para_name: str
-    para_value: str
-    message: Optional[str] = None  # 添加可选的 message 字段
-
-@app.post(
-    "/api/v1/device/rpc_change",
-    tags=["管理员/客服 | Admin/Service"],
-    summary="单参数RPC变更",
-    description="通过para_name和para_value远程修改设备参数，自动记录变更日志并通过MQTT下发RPC指令。"
-)
-async def rpc_change(
-    req: RPCChangeRequest,
-    user=Depends(get_current_user)
-):
-    if user["role"] not in ("admin", "service"):
-        raise HTTPException(status_code=403, detail="只有管理员和客服可以操作")
-    async with engine.begin() as conn:
-        device_row = (await conn.execute(
-            text("SELECT id FROM devices WHERE device_sn=:sn"),
-            {"sn": req.device_sn}
-        )).mappings().first()
-        if not device_row:
-            raise HTTPException(status_code=404, detail="设备不存在")
-        device_id = device_row["id"]
-        
-        # 生成时间戳 + 随机字母的 request_id
-        timestamp = str(int(time.time()))
-        random_letters = ''.join(random.choices(string.ascii_uppercase, k=4))
-        request_id = f"{timestamp}{random_letters}"
-        
-        # 写入变更日志，包含 message
         await conn.execute(
             text("""
-                INSERT INTO device_rpc_change_log (
-                  device_id, operator, request_id, para_name, para_value, status, message
-                ) VALUES (
-                  :device_id, :operator, :request_id, :para_name, :para_value, 'pending', :message
-                )
+                UPDATE alarms
+                SET status='cleared', cleared_at=now(), cleared_by=:by
+                WHERE id = ANY(:ids) AND status != 'cleared'
             """),
-            {
-                "device_id": device_id,
-                "operator": user["username"],
-                "request_id": request_id,
-                "para_name": req.para_name,
-                "para_value": req.para_value,
-                "message": req.message or f"change {req.para_name} = {req.para_value}"  # 默认消息
-            }
+            {"ids": data.alarm_ids, "by": user["username"]}
         )
-    # 下发MQTT RPC消息
-    mqtt_topic = f"devices/{req.device_sn}/rpc"
-    mqtt_payload = {
-        "request_id": request_id,
-        "para_name": req.para_name,
-        "para_value": req.para_value,
-        "operator": user["username"],
-        "message": req.message or f"change {req.para_name} = {req.para_value}",  # 也发给设备
-        "timestamp": datetime.utcnow().isoformat() + "Z"
-    }
-    publish.single(mqtt_topic, json.dumps(mqtt_payload), hostname=os.getenv("MQTT_HOST"), port=int(os.getenv("MQTT_PORT", "1883")))
-    return {"status": "ok", "request_id": request_id, "message": req.message}
-
-class RPCChangeLog(BaseModel):
-    id: int
-    device_id: int
-    device_sn: Optional[str] = None
-    operator: str
-    request_id: str
-    para_name: str
-    para_value: str
-    status: str  # pending/success/failed/error/timeout
-    message: Optional[str] = None
-    created_at: datetime
-    confirmed_at: Optional[datetime] = None
-
-class RPCLogListResponse(BaseModel):
-    items: List[RPCChangeLog]
-    page: int
-    page_size: int
-    total: int
-
-@app.get(
-    "/api/v1/device/rpc_history",
-    response_model=RPCLogListResponse,
-    tags=["管理员/客服 | Admin/Service"],
-    summary="查询RPC变更历史 | Query RPC Change History",
-    description="""
-查询设备的RPC变更历史记录，支持按设备SN、状态、操作人筛选。
-
-Query RPC change history for devices. Supports filtering by device SN, status, and operator.
-"""
-)
-async def get_rpc_history(
-    device_sn: Optional[str] = Query(None, description="设备序列号 | Device Serial Number"),
-    status: Optional[str] = Query(None, description="状态: pending/success/failed/error/timeout | Status"),
-    operator: Optional[str] = Query(None, description="操作人用户名 | Operator Username"),
-    page: int = Query(1, ge=1, description="页码 | Page number"),
-    page_size: int = Query(20, ge=1, le=200, description="每页数量 | Page size"),
-    user=Depends(get_current_user)
-):
-    if user["role"] not in ("admin", "service"):
-        raise HTTPException(status_code=403, detail="无权限")
-    
-    where = []
-    params = {}
-    
-    if device_sn:
-        where.append("d.device_sn = :device_sn")
-        params["device_sn"] = device_sn
-    
-    if status:
-        where.append("r.status = :status")
-        params["status"] = status
-    
-    if operator:
-        where.append("r.operator = :operator")
-        params["operator"] = operator
-    
-    cond = "WHERE " + " AND ".join(where) if where else ""
-    offset = (page - 1) * page_size
-    
-    async with engine.connect() as conn:
-        count_sql = text(f"""
-            SELECT COUNT(*) 
-            FROM device_rpc_change_log r
-            JOIN devices d ON r.device_id = d.id
-            {cond}
-        """)
-        total = (await conn.execute(count_sql, params)).scalar_one()
-        
-        query_sql = text(f"""
-            SELECT r.*, d.device_sn 
-            FROM device_rpc_change_log r
-            JOIN devices d ON r.device_id = d.id
-            {cond}
-            ORDER BY r.created_at DESC
-            LIMIT :limit OFFSET :offset
-        """)
-        rows = (await conn.execute(query_sql, {**params, "limit": page_size, "offset": offset})).mappings().all()
-    
-    items = [dict(row) for row in rows]
-    return {"items": items, "page": page, "page_size": page_size, "total": total}
-
-import asyncio
-
-async def cleanup_rpc_logs():
-    """每天凌晨2点分批清理6个月前的RPC日志，每批最多500条"""
-    while True:
-        # 计算距离下一个凌晨2点的秒数
-        now = datetime.now()
-        tomorrow_2am = (now + timedelta(days=1)).replace(hour=2, minute=0, second=0, microsecond=0)
-        sleep_seconds = (tomorrow_2am - now).total_seconds()
-        await asyncio.sleep(sleep_seconds)
-        try:
-            async with engine.begin() as conn:
-                total_deleted = 0
-                while True:
-                    result = await conn.execute(
-                        text("""
-                            DELETE FROM device_rpc_change_log
-                            WHERE created_at < now() - INTERVAL '6 months'
-                            LIMIT 500
-                        """)
-                    )
-                    deleted = result.rowcount
-                    total_deleted += deleted
-                    if deleted < 500:
-                        break
-                if total_deleted > 0:
-                    print(f"清理了 {total_deleted} 条6个月前的RPC历史记录")
-        except Exception as e:
-            print(f"清理RPC日志失败: {e}")
-
-@app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(cleanup_rpc_logs())
-
-@app.delete(
-    "/api/v1/device/rpc_log/cleanup",
-    tags=["管理员/客服 | Admin/Service"],
-    summary="按设备SN清理RPC日志 | Cleanup RPC Logs by Device SN",
-    description="""
-管理员可按设备序列号清除该设备所有RPC日志。
-
-Admin can cleanup all RPC logs for a device by its serial number.
-"""
-)
-async def cleanup_rpc_log_by_sn(
-    device_sn: str = Query(..., description="设备序列号 | Device Serial Number"),
-    user=Depends(get_current_user)
-):
-    if user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="只有管理员可以清理RPC日志")
-    async with engine.begin() as conn:
-        # 查找设备ID
-        device_row = (await conn.execute(
-            text("SELECT id FROM devices WHERE device_sn=:sn"),
-            {"sn": device_sn}
-        )).mappings().first()
-        if not device_row:
-            raise HTTPException(status_code=404, detail="设备不存在")
-        device_id = device_row["id"]
-        # 删除该设备所有RPC日志
-        result = await conn.execute(
-            text("DELETE FROM device_rpc_change_log WHERE device_id=:id"),
-            {"id": device_id}
-        )
-    return {
-        "msg": f"已清除设备 {device_sn} 的所有RPC日志",
-        "deleted_count": result.rowcount,
-        "device_sn": device_sn
-    }
-
-class UserDeleteRequest(BaseModel):
-    password: str = Field(..., description="当前密码 | Current password")
-
-@app.delete(
-    "/api/v1/user/delete",
-    tags=["用户 | User"],
-    summary="删除自己的账户 | Delete Own Account",
-    description="""
-用户可自助注销账户，需验证当前密码。注销前会自动解绑所有设备，操作不可恢复。
-
-User can delete their own account after verifying the current password. All devices will be unbound before deletion. This action cannot be undone.
-"""
-)
-async def delete_user_account(
-    req: UserDeleteRequest,
-    user=Depends(get_current_user)
-):
-    async with async_session() as session:
-        # 校验密码
-        result = await session.execute(
-            text("SELECT password_hash FROM users WHERE id=:uid"),
-            {"uid": user["user_id"]}
-        )
-        row = result.first()
-        if not row or not bcrypt.checkpw(req.password.encode(), row.password_hash.encode()):
-            raise HTTPException(status_code=401, detail={"msg": "密码错误", "msg_en": "Incorrect password"})
-        # 解绑所有设备
-        await session.execute(
-            text("UPDATE devices SET user_id=NULL WHERE user_id=:uid"),
-            {"uid": user["user_id"]}
-        )
-        # 删除用户及相关数据
-        await session.execute(text("DELETE FROM users WHERE id=:uid"), {"uid": user["user_id"]})
-        await session.commit()
-    return {"msg": "账户已删除，设备已解绑", "msg_en": "Account deleted and devices unbound"}
-
-class UserChangePasswordRequest(BaseModel):
-    old_password: str = Field(..., description="当前密码 | Current password")
-    new_password: str = Field(..., description="新密码 | New password")
-
-@app.post(
-    "/api/v1/user/change_password",
-    tags=["用户 | User"],
-    summary="修改自己的密码 | Change Own Password",
-    description="""
-用户可自助修改密码，需验证当前密码。
-
-User can change their own password after verifying the current password.
-"""
-)
-async def change_user_password(
-    req: UserChangePasswordRequest,
-    user=Depends(get_current_user)
-):
-    async with async_session() as session:
-        # 校验旧密码
-        result = await session.execute(
-            text("SELECT password_hash FROM users WHERE id=:uid"),
-            {"uid": user["user_id"]}
-        )
-        row = result.first()
-        if not row or not bcrypt.checkpw(req.old_password.encode(), row.password_hash.encode()):
-            raise HTTPException(status_code=401, detail={"msg": "当前密码错误", "msg_en": "Incorrect current password"})
-        # 更新新密码
-        new_hash = bcrypt.hashpw(req.new_password.encode(), bcrypt.gensalt()).decode()
-        await session.execute(
-            text("UPDATE users SET password_hash=:p WHERE id=:uid"),
-            {"p": new_hash, "uid": user["user_id"]}
-        )
-        await session.commit()
-    return {"msg": "密码修改成功", "msg_en": "Password changed successfully"}
-
-@app.get(
-    "/api/v1/device/stat_count",
-    tags=["管理员/客服 | Admin/Service"],
-    summary="设备数量与在线数量统计 | Device Count & Online Count",
-    description="""
-仅管理员和客服可用。统计所有设备总数量和在线设备数量（60秒内有实时数据视为在线）。
-
-Admin and service only. Count total devices and online devices (devices with realtime data in the last 60 seconds are considered online).
-"""
-)
-async def stat_device_count(
-    fresh_secs: int = Query(60, description="判定在线的秒数 | Seconds to judge online"),
-    user=Depends(get_current_user)
-):
-    if user["role"] not in ("admin", "service"):
-        raise HTTPException(status_code=403, detail="无权限")
-    now = datetime.now(timezone.utc)
-    async with engine.connect() as conn:
-        # 总设备数
-        total_sql = text("SELECT COUNT(*) FROM devices")
-        device_count = (await conn.execute(total_sql)).scalar_one()
-        # 在线设备数
-        online_sql = text("""
-            SELECT COUNT(DISTINCT device_id)
-            FROM ess_realtime_data
-            WHERE updated_at >= :since
-        """)
-        since = now - timedelta(seconds=fresh_secs)
-        online_count = (await conn.execute(online_sql, {"since": since})).scalar_one()
-    return {
-        "device_count": device_count,
-        "online_count": online_count,
-        "fresh_secs": fresh_secs
-    }
-
-@app.get(
-    "/api/v1/user/stat_count",
-    tags=["管理员/客服 | Admin/Service"],
-    summary="用户数量与已绑定设备用户数量统计 | User Count & Bound Device User Count",
-    description="""
-仅管理员和客服可用。统计用户总数量和已绑定设备的用户数量。
-
-Admin and service only. Count total users and users who have at least one bound device.
-"""
-)
-async def stat_user_count(
-    user=Depends(get_current_user)
-):
-    if user["role"] not in ("admin", "service"):
-        raise HTTPException(status_code=403, detail="无权限")
-    async with engine.connect() as conn:
-        # 用户总数量
-        total_sql = text("SELECT COUNT(*) FROM users")
-        user_count = (await conn.execute(total_sql)).scalar_one()
-        # 已绑定设备的用户数量
-        bound_sql = text("""
-            SELECT COUNT(DISTINCT user_id)
-            FROM devices
-            WHERE user_id IS NOT NULL
-        """)
-        bound_user_count = (await conn.execute(bound_sql)).scalar_one()
-    return {
-        "user_count": user_count,
-        "bound_user_count": bound_user_count
-    }
+    return {"msg": "批量清除成功"}
 
 @app.get(
     "/api/v1/alarms/unhandled_count",
     tags=["管理员/客服 | Admin/Service"],
     summary="统计未处理报警数量（含各等级） | Count Unhandled Alarms (by Level)",
     description="""
-仅管理员和客服可用。统计所有未处理（active/pending）报警的总数量及各等级数量。
-
-Admin and service only. Count the total number of unhandled alarms (status = active or pending), and the count by level.
+仅管理员和客服可用。统计所有未处理（active/confirmed）报警的总数量及各等级数量。
 """
 )
 async def count_unhandled_alarms(
@@ -1426,14 +1109,14 @@ async def count_unhandled_alarms(
         # 总数
         total_sql = text("""
             SELECT COUNT(*) FROM alarms
-            WHERE status IN ('active', 'pending')
+            WHERE status IN ('active', 'confirmed')
         """)
         total_count = (await conn.execute(total_sql)).scalar_one()
         # 按等级统计
         level_sql = text("""
             SELECT level, COUNT(*) AS count
             FROM alarms
-            WHERE status IN ('active', 'pending')
+            WHERE status IN ('active', 'confirmed')
             GROUP BY level
         """)
         rows = (await conn.execute(level_sql)).mappings().all()

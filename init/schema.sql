@@ -185,27 +185,7 @@ SELECT cron.schedule(
   $$DELETE FROM email_codes WHERE expires_at < now() OR used = TRUE$$
 );
 
--- 报警表：存储所有报警信息（含历史）
--- Alarm table: stores all alarm information (including history)
-CREATE TABLE IF NOT EXISTS alarms (
-  id BIGSERIAL PRIMARY KEY,                -- 报警ID / Alarm ID
-  device_id BIGINT REFERENCES devices(id) ON DELETE SET NULL, -- 关联设备ID / Related device ID
-  alarm_type TEXT NOT NULL,                -- 报警类型（如 overvoltage, offline, system, business 等）/ Alarm type
-  level TEXT NOT NULL DEFAULT 'info',      -- 报警级别（info, warning, critical, fatal）/ Alarm level
-  message TEXT NOT NULL,                   -- 报警内容 / Alarm message
-  extra JSONB,                             -- 额外信息（可选，结构化扩展）/ Extra info (optional, for structured extension)
-  status TEXT NOT NULL DEFAULT 'active',   -- 状态（active, confirmed, cleared）/ Status (active, confirmed, cleared)
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(), -- 报警时间 / Alarm time
-  confirmed_at TIMESTAMPTZ,                -- 确认时间 / Confirmed time
-  cleared_at TIMESTAMPTZ,                  -- 清除时间 / Cleared time
-  cleared_by TEXT                          -- 清除人（system/用户名）/ Cleared by (system/username)
-);
 
--- 索引建议
-CREATE INDEX IF NOT EXISTS ix_alarms_device_id ON alarms(device_id);
-CREATE INDEX IF NOT EXISTS ix_alarms_level ON alarms(level);
-CREATE INDEX IF NOT EXISTS ix_alarms_status ON alarms(status);
-CREATE INDEX IF NOT EXISTS ix_alarms_created_at ON alarms(created_at DESC);
 
 ALTER USER admin WITH PASSWORD '123456';
 
@@ -240,4 +220,56 @@ CREATE INDEX IF NOT EXISTS idx_rpc_change_log_device_id ON device_rpc_change_log
 CREATE INDEX IF NOT EXISTS idx_rpc_change_log_request_id ON device_rpc_change_log(request_id);
 CREATE INDEX IF NOT EXISTS idx_rpc_change_log_status ON device_rpc_change_log(status);
 CREATE INDEX IF NOT EXISTS idx_rpc_change_log_created_at ON device_rpc_change_log(created_at DESC);
+
+-- 当前报警表 alarms
+CREATE TABLE IF NOT EXISTS alarms (
+  id BIGSERIAL PRIMARY KEY,                        
+  device_id BIGINT REFERENCES devices(id) ON DELETE SET NULL, 
+  alarm_type TEXT NOT NULL,                        
+  code TEXT NOT NULL,                              
+  level TEXT NOT NULL DEFAULT 'info',              
+  extra JSONB,                                     
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'confirmed', 'cleared')), 
+  first_triggered_at TIMESTAMPTZ NOT NULL DEFAULT now(), 
+  last_triggered_at TIMESTAMPTZ NOT NULL DEFAULT now(),  
+  repeat_count INT NOT NULL DEFAULT 1,             
+  remark TEXT,                                     
+  confirmed_at TIMESTAMPTZ,                        
+  confirmed_by TEXT,                               
+  cleared_at TIMESTAMPTZ,                          
+  cleared_by TEXT,
+  UNIQUE (device_id, alarm_type, code, status)      -- 唯一约束，防止重复报警
+);
+
+CREATE INDEX IF NOT EXISTS idx_alarms_device_id ON alarms(device_id);
+CREATE INDEX IF NOT EXISTS idx_alarms_level ON alarms(level);
+CREATE INDEX IF NOT EXISTS idx_alarms_status ON alarms(status);
+CREATE INDEX IF NOT EXISTS idx_alarms_first_triggered_at ON alarms(first_triggered_at DESC);
+
+-- 历史报警表 alarm_history
+CREATE TABLE IF NOT EXISTS alarm_history (
+  id BIGSERIAL PRIMARY KEY,                        
+  device_id BIGINT,                                
+  alarm_type TEXT NOT NULL,                        
+  code TEXT NOT NULL,                              
+  level TEXT NOT NULL,                             
+  extra JSONB,                                     
+  status TEXT NOT NULL CHECK (status IN ('active', 'confirmed', 'cleared')), 
+  first_triggered_at TIMESTAMPTZ NOT NULL,         
+  last_triggered_at TIMESTAMPTZ NOT NULL,          
+  repeat_count INT NOT NULL DEFAULT 1,             
+  remark TEXT,                                     
+  confirmed_at TIMESTAMPTZ,                        
+  confirmed_by TEXT,                               
+  cleared_at TIMESTAMPTZ,                          
+  cleared_by TEXT,                                 
+  archived_at TIMESTAMPTZ NOT NULL DEFAULT now(),  
+  duration INTERVAL                                
+);
+
+CREATE INDEX IF NOT EXISTS idx_alarm_history_device_id ON alarm_history(device_id);
+CREATE INDEX IF NOT EXISTS idx_alarm_history_level ON alarm_history(level);
+CREATE INDEX IF NOT EXISTS idx_alarm_history_status ON alarm_history(status);
+CREATE INDEX IF NOT EXISTS idx_alarm_history_first_triggered_at ON alarm_history(first_triggered_at DESC);
+CREATE INDEX IF NOT EXISTS idx_alarm_history_archived_at ON alarm_history(archived_at DESC);
 
