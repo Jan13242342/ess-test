@@ -1612,6 +1612,9 @@ async def confirm_alarm_by_sn_and_code(
             if cleared_at and first_triggered_at:
                 duration = int((cleared_at - first_triggered_at).total_seconds())
 
+            # 将 extra 转换为 JSON 字符串
+            extra = json.dumps(row["extra"]) if isinstance(row["extra"], dict) else row["extra"]
+
             await conn.execute(
                 text("""
                     INSERT INTO alarm_history (
@@ -1629,7 +1632,7 @@ async def confirm_alarm_by_sn_and_code(
                     "alarm_type": row["alarm_type"],
                     "code": row["code"],
                     "level": row["level"],
-                    "extra": row["extra"],
+                    "extra": extra,  # 使用转换后的 JSON 字符串
                     "status": row["status"],
                     "first_triggered_at": row["first_triggered_at"],
                     "last_triggered_at": row["last_triggered_at"],
