@@ -1405,7 +1405,7 @@ async def cleanup_rpc_logs():
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(cleanup_rpc_logs())
-     asyncio.create_task(cleanup_alarm_history())
+    asyncio.create_task(cleanup_alarm_history())
 
 class UserChangePasswordRequest(BaseModel):
     old_password: str = Field(..., description="当前密码 | Current password")
