@@ -1619,8 +1619,8 @@ async def confirm_alarm_by_sn_and_code(
             # 将 extra 转换为 JSON 字符串
             extra = json.dumps(row["extra"]) if isinstance(row["extra"], dict) else row["extra"]
 
-            # 将 duration 转换为 PostgreSQL INTERVAL 格式
-            duration_interval = f"{duration} seconds" if duration else None
+            # 将 duration 转换为 timedelta
+            duration = timedelta(seconds=duration) if duration else None
 
             await conn.execute(
                 text("""
@@ -1649,7 +1649,7 @@ async def confirm_alarm_by_sn_and_code(
                     "confirmed_by": row["confirmed_by"],
                     "cleared_at": row["cleared_at"],
                     "cleared_by": row["cleared_by"],
-                    "duration": duration_interval,  # 直接传递字符串格式的 INTERVAL
+                    "duration": duration,  # 传递 timedelta 对象
                 }
             )
 
