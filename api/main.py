@@ -1081,10 +1081,11 @@ async def batch_confirm_alarm_by_code(
         result = await conn.execute(
             text("""
                 UPDATE alarms
-                SET status='confirmed', confirmed_at=now(), confirmed_by=:by
-                WHERE code = :code AND status != 'confirmed'
+                SET confirmed_at = now(), confirmed_by = :by
+                WHERE device_id = :device_id AND code = :code
+                AND confirmed_at IS NULL
             """),
-            {"code": data.code, "by": user["username"]}
+            {"device_id": device_id, "code": data.code, "by": user["username"]}
         )
     return {"msg": f"已确认所有 code={data.code} 的报警", "confirmed_count": result.rowcount}
 
@@ -1581,8 +1582,9 @@ async def confirm_alarm_by_sn_and_code(
         result = await conn.execute(
             text("""
                 UPDATE alarms
-                SET status='confirmed', confirmed_at=now(), confirmed_by=:by
-                WHERE device_id = :device_id AND code = :code AND status != 'confirmed'
+                SET confirmed_at = now(), confirmed_by = :by
+                WHERE device_id = :device_id AND code = :code
+                AND confirmed_at IS NULL
             """),
             {"device_id": device_id, "code": data.code, "by": user["username"]}
         )
