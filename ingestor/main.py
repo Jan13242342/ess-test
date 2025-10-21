@@ -296,7 +296,9 @@ def on_message(client, userdata, msg):
                                     )
                                     """,
                                     (
-                                        row[1], row[2], row[3], row[4], row[5], "cleared",
+                                        row[1], row[2], row[3], row[4],
+                                        json.dumps(row[5]) if isinstance(row[5], dict) else row[5],  # 修正extra
+                                        "cleared",
                                         row[7], row[8], row[9], row[10],
                                         row[11], row[12], alarm["cleared_at"], alarm["cleared_by"],
                                         (alarm["cleared_at"] and row[7] and (alarm["cleared_at"] - row[7])) or None
