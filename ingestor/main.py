@@ -182,8 +182,7 @@ DO UPDATE SET
   repeat_count = alarms.repeat_count + 1,
   level = EXCLUDED.level,
   extra = EXCLUDED.extra,
-  remark = EXCLUDED.remark
-;
+  remark = EXCLUDED.remark;
 """
 
 # 新增 para topic 和队列
