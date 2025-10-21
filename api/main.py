@@ -1347,8 +1347,36 @@ async def cleanup_rpc_log_by_sn(
         "device_sn": device_sn
     }
 
+async def cleanup_alarm_history():
+    """每天凌晨2点分批清理1年前的历史报警记录，每批最多500条"""
+    while True:
+        now = datetime.now()
+        tomorrow_2am = (now + timedelta(days=1)).replace(hour=2, minute=0, second=0, microsecond=0)
+        sleep_seconds = (tomorrow_2am - now).total_seconds()
+        await asyncio.sleep(sleep_seconds)
+        try:
+            async with engine.begin() as conn:
+                total_deleted = 0
+                while True:
+                    result = await conn.execute(
+                        text("""
+                            DELETE FROM alarm_history
+                            WHERE first_triggered_at < now() - INTERVAL '1 year'
+                            LIMIT 500
+                        """)
+                    )
+                    deleted = result.rowcount
+                    total_deleted += deleted
+                    if deleted < 500:
+                        break
+                if total_deleted > 0:
+                    print(f"清理了 {total_deleted} 条1年前的历史报警记录")
+        except Exception as e:
+            print(f"清理历史报警失败: {e}")
+         
+
 async def cleanup_rpc_logs():
-    """每天凌晨2点分批清理6个月前的RPC日志，每批最多500条"""
+    """每天凌晨2点分批清理1年前的RPC日志，每批最多500条"""
     while True:
         now = datetime.now()
         tomorrow_2am = (now + timedelta(days=1)).replace(hour=2, minute=0, second=0, microsecond=0)
@@ -1361,7 +1389,7 @@ async def cleanup_rpc_logs():
                     result = await conn.execute(
                         text("""
                             DELETE FROM device_rpc_change_log
-                            WHERE created_at < now() - INTERVAL '6 months'
+                            WHERE created_at < now() - INTERVAL '1 year'
                             LIMIT 500
                         """)
                     )
@@ -1370,13 +1398,14 @@ async def cleanup_rpc_logs():
                     if deleted < 500:
                         break
                 if total_deleted > 0:
-                    print(f"清理了 {total_deleted} 条6个月前的RPC历史记录")
+                    print(f"清理了 {total_deleted} 条1年前的RPC历史记录")
         except Exception as e:
             print(f"清理RPC日志失败: {e}")
 
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(cleanup_rpc_logs())
+     asyncio.create_task(cleanup_alarm_history())
 
 class UserChangePasswordRequest(BaseModel):
     old_password: str = Field(..., description="当前密码 | Current password")
@@ -1420,8 +1449,8 @@ class AlarmBatchClearByCodeRequest(BaseModel):
 @app.post(
     "/api/v1/alarms/admin/batch_clear",
     tags=["管理员/客服 | Admin/Service"],
-    summary="按code批量清除报警 | Batch Clear Alarms By Code",
-    description="管理员/客服按报警code批量清除所有未清除的报警（只操作当前报警表，历史报警不能清除）。"
+    summary="按code批量清除报警并归档 | Batch Clear Alarms By Code and Archive",
+    description="管理员/客服按报警code批量清除所有未清除的报警，并同步归档到历史报警表。"
 )
 async def batch_clear_alarm_by_code(
     data: AlarmBatchClearByCodeRequest,
@@ -1430,12 +1459,94 @@ async def batch_clear_alarm_by_code(
     if user["role"] not in ("admin", "service"):
         raise HTTPException(status_code=403, detail="无权限")
     async with engine.begin() as conn:
-        result = await conn.execute(
+        # 查询所有未清除的报警
+        rows = (await conn.execute(
             text("""
-                UPDATE alarms
-                SET status='cleared', cleared_at=now(), cleared_by=:by
+                SELECT * FROM alarms
                 WHERE code = :code AND status != 'cleared'
             """),
-            {"code": data.code, "by": user["username"]}
+            {"code": data.code}
+        )).mappings().all()
+        cleared_count = 0
+        for alarm in rows:
+            # 归档到 alarm_history
+            await conn.execute(
+                text("""
+                    INSERT INTO alarm_history (
+                        device_id, alarm_type, code, level, extra, status,
+                        first_triggered_at, last_triggered_at, repeat_count, remark,
+                        confirmed_at, confirmed_by, cleared_at, cleared_by, archived_at, duration
+                    ) VALUES (
+                        :device_id, :alarm_type, :code, :level, :extra, 'cleared',
+                        :first_triggered_at, :last_triggered_at, :repeat_count, :remark,
+                        :confirmed_at, :confirmed_by, now(), :cleared_by, now(),
+                        EXTRACT(EPOCH FROM (now() - :first_triggered_at))
+                    )
+                """),
+                {
+                    "device_id": alarm["device_id"],
+                    "alarm_type": alarm["alarm_type"],
+                    "code": alarm["code"],
+                    "level": alarm["level"],
+                    "extra": alarm["extra"],
+                    "first_triggered_at": alarm["first_triggered_at"],
+                    "last_triggered_at": alarm["last_triggered_at"],
+                    "repeat_count": alarm["repeat_count"],
+                    "remark": alarm["remark"],
+                    "confirmed_at": alarm["confirmed_at"],
+                    "confirmed_by": alarm["confirmed_by"],
+                    "cleared_by": user["username"]
+                }
+            )
+            # 删除当前报警
+            await conn.execute(
+                text("DELETE FROM alarms WHERE id=:id"),
+                {"id": alarm["id"]}
+            )
+            cleared_count += 1
+    return {"msg": f"已清除并归档所有 code={data.code} 的报警", "cleared_count": cleared_count}
+
+class AdminDeleteAlarmHistoryRequest(BaseModel):
+    alarm_id: int
+
+@app.delete(
+    "/api/v1/admin/alarm_history/delete",
+    tags=["管理员 | Admin Only"],
+    summary="管理员删除单条历史报警记录",
+    description="只有管理员可以删除单条历史报警记录，客服无权限。"
+)
+async def admin_delete_alarm_history(
+    data: AdminDeleteAlarmHistoryRequest,
+    user=Depends(get_current_user)
+):
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="只有管理员可以删除历史报警记录")
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("DELETE FROM alarm_history WHERE id=:id"),
+            {"id": data.alarm_id}
         )
-    return {"msg": f"已清除所有 code={data.code} 的报警", "cleared_count": result.rowcount}
+    return {"msg": "历史报警记录已删除", "deleted_count": result.rowcount}
+
+
+class AdminDeleteRPCLogRequest(BaseModel):
+    rpc_log_id: int
+
+@app.delete(
+    "/api/v1/admin/rpc_log/delete",
+    tags=["管理员 | Admin Only"],
+    summary="管理员删除单条RPC日志",
+    description="只有管理员可以删除单条RPC日志，客服无权限。"
+)
+async def admin_delete_rpc_log(
+    data: AdminDeleteRPCLogRequest,
+    user=Depends(get_current_user)
+):
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="只有管理员可以删除RPC日志")
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("DELETE FROM device_rpc_change_log WHERE id=:id"),
+            {"id": data.rpc_log_id}
+        )
+    return {"msg": "RPC日志已删除", "deleted_count": result.rowcount}
