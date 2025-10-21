@@ -527,6 +527,98 @@ async def list_history(
     return {"items": items, "page": page, "page_size": page_size, "total": total}
 
 @app.get(
+    "/api/v1/history/admin/by_sn",
+    response_model=HistoryAggListResponse,
+    tags=["管理员/客服 | Admin/Service"],
+    summary="管理员按设备SN查询历史能耗聚合数据",
+    description="管理员或客服可通过设备SN查询该设备的历史能耗聚合数据，支持时间范围和聚合粒度。"
+)
+async def admin_history_by_sn(
+    device_sn: str = Query(..., description="设备序列号"),
+    start: Optional[datetime] = Query(None, description="开始时间"),
+    end: Optional[datetime] = Query(None, description="结束时间"),
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(20, ge=1, le=200, description="每页数量"),
+    admin=Depends(get_current_user)
+):
+    if admin["role"] not in ("admin", "service"):
+        raise HTTPException(status_code=403, detail="无权限")
+    async with engine.connect() as conn:
+        device_row = (await conn.execute(
+            text("SELECT id, device_sn FROM devices WHERE device_sn=:sn"),
+            {"sn": device_sn}
+        )).mappings().first()
+        if not device_row:
+            raise HTTPException(status_code=404, detail="设备不存在")
+        device_id = device_row["id"]
+        device_sn_map = {device_id: device_sn}
+    now = datetime.now(timezone.utc)
+    if not start and not end:
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+        group_expr = "date_trunc('hour', ts)"
+        group_label = "hour"
+    else:
+        if not start:
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        if not end:
+            end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+        months = (end.year - start.year) * 12 + (end.month - start.month)
+        if months >= 2:
+            group_expr = "date_trunc('month', ts)"
+            group_label = "month"
+        else:
+            group_expr = "date_trunc('day', ts)"
+            group_label = "day"
+    params = {"id0": device_id, "start": start, "end": end}
+    where = ["device_id = :id0", "ts >= :start", "ts <= :end"]
+    cond = "WHERE " + " AND ".join(where)
+    offset = (page - 1) * page_size
+    async with engine.connect() as conn:
+        count_sql = text(f"""
+            SELECT COUNT(*) FROM (
+                SELECT {group_expr} AS {group_label}, device_id
+                FROM history_energy
+                {cond}
+                GROUP BY device_id, {group_label}
+            ) t
+        """)
+        query_sql = text(f"""
+            SELECT
+                device_id,
+                {group_expr} AS {group_label},
+                SUM(charge_wh_total) AS charge_wh_total,
+                SUM(discharge_wh_total) AS discharge_wh_total,
+                SUM(pv_wh_total) AS pv_wh_total,
+                SUM(grid_wh_total) AS grid_wh_total
+            FROM history_energy
+            {cond}
+            GROUP BY device_id, {group_label}
+            ORDER BY {group_label} DESC
+            LIMIT :limit OFFSET :offset
+        """)
+        total = (await conn.execute(count_sql, params)).scalar_one()
+        rows = (await conn.execute(query_sql, {**params, "limit": page_size, "offset": offset})).mappings().all()
+    items = []
+    for r in rows:
+        d = dict(r)
+        d["device_sn"] = device_sn_map.get(d["device_id"], "")
+        if group_label == "hour":
+            d["hour"] = d.pop("hour")
+            d["day"] = None
+            d["month"] = None
+        elif group_label == "day":
+            d["day"] = d.pop("day")
+            d["hour"] = None
+            d["month"] = None
+        elif group_label == "month":
+            d["month"] = d.pop("month")
+            d["hour"] = None
+            d["day"] = None
+        items.append(d)
+    return {"items": items, "page": page, "page_size": page_size, "total": total}
+
+@app.get(
     "/api/v1/db/metrics",
     tags=["管理员/客服 | Admin/Service"],
     summary="数据库健康与性能指标 | Database Health & Performance Metrics",
