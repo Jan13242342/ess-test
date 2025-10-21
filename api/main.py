@@ -1550,3 +1550,70 @@ async def admin_delete_rpc_log(
             {"id": data.rpc_log_id}
         )
     return {"msg": "RPC日志已删除", "deleted_count": result.rowcount}
+
+class AdminBatchDeleteAlarmHistoryBySNRequest(BaseModel):
+    device_sn: str
+
+@app.delete(
+    "/api/v1/admin/alarm_history/batch_delete_by_sn",
+    tags=["管理员 | Admin Only"],
+    summary="管理员按设备SN批量删除历史报警",
+    description="只有管理员可以按设备SN批量删除历史报警记录，客服无权限。"
+)
+async def admin_batch_delete_alarm_history_by_sn(
+    data: AdminBatchDeleteAlarmHistoryBySNRequest,
+    user=Depends(get_current_user)
+):
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="只有管理员可以删除历史报警记录")
+    async with engine.begin() as conn:
+        device_row = (await conn.execute(
+            text("SELECT id FROM devices WHERE device_sn=:sn"),
+            {"sn": data.device_sn}
+        )).mappings().first()
+        if not device_row:
+            raise HTTPException(status_code=404, detail="设备不存在")
+        device_id = device_row["id"]
+        result = await conn.execute(
+            text("DELETE FROM alarm_history WHERE device_id=:id"),
+            {"id": device_id}
+        )
+    return {
+        "msg": f"已删除设备 {data.device_sn} 的所有历史报警记录",
+        "deleted_count": result.rowcount,
+        "device_sn": data.device_sn
+    }
+
+
+class AdminBatchDeleteRPCLogBySNRequest(BaseModel):
+    device_sn: str
+
+@app.delete(
+    "/api/v1/admin/rpc_log/batch_delete_by_sn",
+    tags=["管理员 | Admin Only"],
+    summary="管理员按设备SN批量删除RPC日志",
+    description="只有管理员可以按设备SN批量删除RPC日志，客服无权限。"
+)
+async def admin_batch_delete_rpc_log_by_sn(
+    data: AdminBatchDeleteRPCLogBySNRequest,
+    user=Depends(get_current_user)
+):
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="只有管理员可以删除RPC日志")
+    async with engine.begin() as conn:
+        device_row = (await conn.execute(
+            text("SELECT id FROM devices WHERE device_sn=:sn"),
+            {"sn": data.device_sn}
+        )).mappings().first()
+        if not device_row:
+            raise HTTPException(status_code=404, detail="设备不存在")
+        device_id = device_row["id"]
+        result = await conn.execute(
+            text("DELETE FROM device_rpc_change_log WHERE device_id=:id"),
+            {"id": device_id}
+        )
+    return {
+        "msg": f"已删除设备 {data.device_sn} 的所有RPC日志",
+        "deleted_count": result.rowcount,
+        "device_sn": data.device_sn
+    }
