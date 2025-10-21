@@ -1608,9 +1608,13 @@ async def confirm_alarm_by_sn_and_code(
         for row in rows:
             cleared_at = row["cleared_at"]
             first_triggered_at = row["first_triggered_at"]
-            duration = None
-            if cleared_at and first_triggered_at:
-                duration = int((cleared_at - first_triggered_at).total_seconds())
+            last_triggered_at = row["last_triggered_at"]
+
+            # 确保 duration 至少为 1 秒
+            if last_triggered_at and first_triggered_at:
+                duration = max(1, int((last_triggered_at - first_triggered_at).total_seconds()))
+            else:
+                duration = None
 
             # 将 extra 转换为 JSON 字符串
             extra = json.dumps(row["extra"]) if isinstance(row["extra"], dict) else row["extra"]
@@ -1632,7 +1636,7 @@ async def confirm_alarm_by_sn_and_code(
                     "alarm_type": row["alarm_type"],
                     "code": row["code"],
                     "level": row["level"],
-                    "extra": extra,  # 使用转换后的 JSON 字符串
+                    "extra": extra,
                     "status": row["status"],
                     "first_triggered_at": row["first_triggered_at"],
                     "last_triggered_at": row["last_triggered_at"],
