@@ -6,6 +6,7 @@ import time
 import random
 import string
 import asyncio
+import json
 
 
 from dotenv import load_dotenv, find_dotenv
@@ -24,7 +25,6 @@ import aiosmtplib
 from email.message import EmailMessage
 from random import randint
 import uuid
-import json
 import paho.mqtt.publish as publish
 
 
@@ -1315,41 +1315,16 @@ async def get_rpc_history(
         """)
         rows = (await conn.execute(query_sql, {**params, "limit": page_size, "offset": offset})).mappings().all()
     items = [dict(row) for row in rows]
-    return {"items": items, "page": page, "page_size": page_size, "total": total}
-
-
-
-
-@app.delete(
-    "/api/v1/admin/rpc_log/clear_all",
-    tags=["管理员 | Admin Only"],
-    summary="管理员清除所有RPC日志（分批）",
-    description="只有管理员可以分批清除所有RPC日志，客服无权限。"
-)
-async def admin_clear_all_rpc_log(
-    user=Depends(get_current_user)
-):
-    if user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="只有管理员可以清除所有RPC日志")
-    batch_size = 5000
-    total_deleted = 0
-    async with engine.begin() as conn:
-        while True:
-            result = await conn.execute(
-                text(f"DELETE FROM device_rpc_change_log WHERE id IN (SELECT id FROM device_rpc_change_log LIMIT {batch_size})")
-            )
-            deleted = result.rowcount
-            total_deleted += deleted
-            if deleted < batch_size:
-                break
-    return {"msg": "所有RPC日志已清除", "deleted_count": total_deleted}
-
-async def cleanup_alarm_history():
-    """每天凌晨2点分批清理1年前的历史报警记录，每批最多500条"""
+    return {"items": items, "page": page, "page_size": page_size, "totalasync def cleanup_alarm_history():
+    """每周一凌晨2点分批清理1年前的历史报警记录，每批最多500条，并写入操作日志"""
     while True:
         now = datetime.now()
-        tomorrow_2am = (now + timedelta(days=1)).replace(hour=2, minute=0, second=0, microsecond=0)
-        sleep_seconds = (tomorrow_2am - now).total_seconds()
+        # 计算下一个周一凌晨2点
+        days_ahead = (7 - now.weekday()) % 7  # 0=周一
+        if days_ahead == 0 and now.hour >= 2:
+            days_ahead = 7
+        next_run = (now + timedelta(days=days_ahead)).replace(hour=2, minute=0, second=0, microsecond=0)
+        sleep_seconds = (next_run - now).total_seconds()
         await asyncio.sleep(sleep_seconds)
         try:
             async with engine.begin() as conn:
@@ -1367,17 +1342,35 @@ async def cleanup_alarm_history():
                     if deleted < 500:
                         break
                 if total_deleted > 0:
+                    # 写入操作日志
+                    await conn.execute(
+                        text("""
+                            INSERT INTO admin_audit_log (operator, action, params, result)
+                            VALUES (:operator, :action, :params, :result)
+                        """),
+                        {
+                            "operator": "system_task",
+                            "action": "cleanup_alarm_history",
+                            "params": json.dumps({}),
+                            "result": json.dumps({"deleted_count": total_deleted})
+                        }
+                    )
                     print(f"清理了 {total_deleted} 条1年前的历史报警记录")
         except Exception as e:
             print(f"清理历史报警失败: {e}")
-         
+
+
 
 async def cleanup_rpc_logs():
-    """每天凌晨2点分批清理1年前的RPC日志，每批最多500条"""
+    """每周一凌晨2点分批清理1年前的RPC日志，每批最多500条，并写入操作日志"""
     while True:
         now = datetime.now()
-        tomorrow_2am = (now + timedelta(days=1)).replace(hour=2, minute=0, second=0, microsecond=0)
-        sleep_seconds = (tomorrow_2am - now).total_seconds()
+        # 计算下一个周一凌晨2点
+        days_ahead = (7 - now.weekday()) % 7  # 0=周一
+        if days_ahead == 0 and now.hour >= 2:
+            days_ahead = 7
+        next_run = (now + timedelta(days=days_ahead)).replace(hour=2, minute=0, second=0, microsecond=0)
+        sleep_seconds = (next_run - now).total_seconds()
         await asyncio.sleep(sleep_seconds)
         try:
             async with engine.begin() as conn:
@@ -1395,6 +1388,19 @@ async def cleanup_rpc_logs():
                     if deleted < 500:
                         break
                 if total_deleted > 0:
+                    # 写入操作日志
+                    await conn.execute(
+                        text("""
+                            INSERT INTO admin_audit_log (operator, action, params, result)
+                            VALUES (:operator, :action, :params, :result)
+                        """),
+                        {
+                            "operator": "system_task",
+                            "action": "cleanup_rpc_logs",
+                            "params": json.dumps({}),
+                            "result": json.dumps({"deleted_count": total_deleted})
+                        }
+                    )
                     print(f"清理了 {total_deleted} 条1年前的RPC历史记录")
         except Exception as e:
             print(f"清理RPC日志失败: {e}")
@@ -1594,4 +1600,54 @@ async def admin_clear_all_alarm_history(
             total_deleted += deleted
             if deleted < batch_size:
                 break
+        # 写入操作日志
+        await conn.execute(
+            text("""
+                INSERT INTO admin_audit_log (operator, action, params, result)
+                VALUES (:operator, :action, :params, :result)
+            """),
+            {
+                "operator": user["username"],
+                "action": "admin_clear_all_alarm_history",
+                "params": json.dumps({}),
+                "result": json.dumps({"deleted_count": total_deleted})
+            }
+        )
     return {"msg": "所有历史报警记录已清除", "deleted_count": total_deleted}
+
+@app.delete(
+    "/api/v1/admin/rpc_log/clear_all",
+    tags=["管理员 | Admin Only"],
+    summary="管理员清除所有RPC日志（分批）",
+    description="只有管理员可以分批清除所有RPC日志，客服无权限。"
+)
+async def admin_clear_all_rpc_log(
+    user=Depends(get_current_user)
+):
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="只有管理员可以清除所有RPC日志")
+    batch_size = 5000
+    total_deleted = 0
+    async with engine.begin() as conn:
+        while True:
+            result = await conn.execute(
+                text(f"DELETE FROM device_rpc_change_log WHERE id IN (SELECT id FROM device_rpc_change_log LIMIT {batch_size})")
+            )
+            deleted = result.rowcount
+            total_deleted += deleted
+            if deleted < batch_size:
+                break
+        # 写入操作日志
+        await conn.execute(
+            text("""
+                INSERT INTO admin_audit_log (operator, action, params, result)
+                VALUES (:operator, :action, :params, :result)
+            """),
+            {
+                "operator": user["username"],
+                "action": "admin_clear_all_rpc_log",
+                "params": json.dumps({}),
+                "result": json.dumps({"deleted_count": total_deleted})
+            }
+        )
+    return {"msg": "所有RPC日志已清除", "deleted_count": total_deleted}

@@ -273,3 +273,17 @@ CREATE INDEX IF NOT EXISTS idx_alarm_history_status ON alarm_history(status);
 CREATE INDEX IF NOT EXISTS idx_alarm_history_first_triggered_at ON alarm_history(first_triggered_at DESC);
 CREATE INDEX IF NOT EXISTS idx_alarm_history_archived_at ON alarm_history(archived_at DESC);
 
+-- 操作日志表：记录所有敏感操作（管理员/系统任务）
+CREATE TABLE IF NOT EXISTS admin_audit_log (
+  id BIGSERIAL PRIMARY KEY,                -- 日志ID
+  operator VARCHAR(64) NOT NULL,           -- 操作人（用户名或system_task等）
+  action VARCHAR(64) NOT NULL,             -- 操作类型（如 delete_alarm_history, cleanup_rpc_log 等）
+  params JSONB,                            -- 操作参数（如请求体、条件等）
+  result JSONB,                            -- 操作结果（如删除数量、异常信息等）
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now() -- 操作时间
+);
+
+CREATE INDEX IF NOT EXISTS idx_admin_audit_log_operator ON admin_audit_log(operator);
+CREATE INDEX IF NOT EXISTS idx_admin_audit_log_action ON admin_audit_log(action);
+CREATE INDEX IF NOT EXISTS idx_admin_audit_log_created_at ON admin_audit_log(created_at DESC);
+
