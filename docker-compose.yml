@@ -111,15 +111,11 @@ services:
     image: nginx:1.27-alpine
     container_name: ess-nginx
     depends_on:
-      - ess-api
+      - api
     ports:
       - "80:80"
-      # 需要 HTTPS 再开放 443 并配置证书
-      # - "443:443"
     volumes:
       - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      # 如有静态资源可再挂载
-      # - ./static:/usr/share/nginx/html:ro
     restart: unless-stopped
 
 volumes:
