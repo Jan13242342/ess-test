@@ -33,14 +33,14 @@ services:
       - ./api:/app
       - ./log_config.yaml:/app/log_config.yaml:ro
     working_dir: /app
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --log-config /app/log_config.yaml --proxy-headers --forwarded-allow-ips="*"
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips="*"
     depends_on:
       postgres:
         condition: service_healthy
       pgbouncer:
         condition: service_started
-    ports:
-      - "8000:8000"
+    # ports:
+    #   - "8000:8000"
 
   ingestor:
     build: ./ingestor
