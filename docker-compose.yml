@@ -33,7 +33,7 @@ services:
       - ./api:/app
       - ./log_config.yaml:/app/log_config.yaml:ro
     working_dir: /app
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --log-config /app/log_config.yaml
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --log-config /app/log_config.yaml --proxy-headers --forwarded-allow-ips="*"
     depends_on:
       postgres:
         condition: service_healthy
@@ -106,6 +106,21 @@ services:
     volumes:
       - pgadmin_data:/var/lib/pgadmin
       - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: ess-nginx
+    depends_on:
+      - ess-api
+    ports:
+      - "80:80"
+      # 需要 HTTPS 再开放 443 并配置证书
+      # - "443:443"
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # 如有静态资源可再挂载
+      # - ./static:/usr/share/nginx/html:ro
+    restart: unless-stopped
 
 volumes:
   pg_data:
