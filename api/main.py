@@ -37,6 +37,8 @@ settings = Settings()
 engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=True)
 app = FastAPI(title="ESS Realtime API", version="1.0.0")
 
+
+
 # 修改模型，增加 device_sn
 class RealtimeData(BaseModel):
     device_id: int
@@ -1300,8 +1302,12 @@ async def cleanup_alarm_history():
                     result = await conn.execute(
                         text("""
                             DELETE FROM alarm_history
-                            WHERE first_triggered_at < now() - INTERVAL '1 year'
-                            LIMIT 500
+                            WHERE id IN (
+                                SELECT id FROM alarm_history
+                                WHERE first_triggered_at < now() - INTERVAL '1 year'
+                                ORDER BY id
+                                LIMIT 500
+                            )
                         """)
                     )
                     deleted = result.rowcount
@@ -1309,7 +1315,6 @@ async def cleanup_alarm_history():
                     if deleted < 500:
                         break
                 if total_deleted > 0:
-                    # 写入操作日志
                     await conn.execute(
                         text("""
                             INSERT INTO admin_audit_log (operator, action, params, result)
@@ -1332,8 +1337,7 @@ async def cleanup_rpc_logs():
     """每周一凌晨2点分批清理1年前的RPC日志，每批最多500条，并写入操作日志"""
     while True:
         now = datetime.now()
-        # 计算下一个周一凌晨2点
-        days_ahead = (7 - now.weekday()) % 7  # 0=周一
+        days_ahead = (7 - now.weekday()) % 7
         if days_ahead == 0 and now.hour >= 2:
             days_ahead = 7
         next_run = (now + timedelta(days=days_ahead)).replace(hour=2, minute=0, second=0, microsecond=0)
@@ -1346,8 +1350,12 @@ async def cleanup_rpc_logs():
                     result = await conn.execute(
                         text("""
                             DELETE FROM device_rpc_change_log
-                            WHERE created_at < now() - INTERVAL '1 year'
-                            LIMIT 500
+                            WHERE id IN (
+                                SELECT id FROM device_rpc_change_log
+                                WHERE created_at < now() - INTERVAL '1 year'
+                                ORDER BY id
+                                LIMIT 500
+                            )
                         """)
                     )
                     deleted = result.rowcount
@@ -1355,7 +1363,6 @@ async def cleanup_rpc_logs():
                     if deleted < 500:
                         break
                 if total_deleted > 0:
-                    # 写入操作日志
                     await conn.execute(
                         text("""
                             INSERT INTO admin_audit_log (operator, action, params, result)
@@ -1663,3 +1670,79 @@ async def confirm_alarm_by_sn_and_code(
             )
 
     return {"msg": f"已确认设备 {data.device_sn} code={data.code} 的所有报警", "confirmed_count": result.rowcount}
+
+
+
+
+# 用户 RPC 参数白名单（硬编码，不使用环境变量）
+USER_RPC_ALLOWED = {"control_mode"}
+
+@app.post(
+    "/api/v1/device/user_rpc_change",
+    tags=["用户 | User"],
+    summary="用户参数下发 | User RPC Change",
+    description="普通用户仅可对自己名下设备发起 RPC 请求（参数白名单：control_mode）。"
+)
+async def user_rpc_change(
+    req: RPCChangeRequest,            # 复用已有模型
+    user=Depends(get_current_user)
+):
+    # 仅普通用户
+    if user["role"] in ("admin", "service"):
+        raise HTTPException(status_code=403, detail="管理员/客服请使用管理员接口")
+
+    # 参数白名单校验（仅允许 control_mode）
+    if req.para_name not in USER_RPC_ALLOWED:
+        raise HTTPException(status_code=403, detail=f"不允许修改参数: {req.para_name}")
+
+    # 校验设备归属
+    async with engine.begin() as conn:
+        device_row = (await conn.execute(
+            text("SELECT id FROM devices WHERE device_sn=:sn AND user_id=:uid"),
+            {"sn": req.device_sn, "uid": user["user_id"]}
+        )).mappings().first()
+        if not device_row:
+            raise HTTPException(status_code=404, detail="设备不存在或不属于当前用户")
+        device_id = device_row["id"]
+
+        # 生成唯一 request_id
+        timestamp = str(int(time.time()))
+        random_letters = ''.join(random.choices(string.ascii_uppercase, k=4))
+        request_id = f"{timestamp}{random_letters}"
+
+        # 写入变更日志（pending）
+        await conn.execute(
+            text("""
+                INSERT INTO device_rpc_change_log (
+                  device_id, operator, request_id, para_name, para_value, status, message
+                ) VALUES (
+                  :device_id, :operator, :request_id, :para_name, :para_value, 'pending', :message
+                )
+            """),
+            {
+                "device_id": device_id,
+                "operator": user["username"],  # 标记操作人
+                "request_id": request_id,
+                "para_name": req.para_name,
+                "para_value": req.para_value,
+                "message": req.message or f"user change {req.para_name} = {req.para_value}"
+            }
+        )
+    # 下发MQTT RPC消息
+    mqtt_topic = f"devices/{req.device_sn}/rpc"
+    mqtt_payload = {
+        "request_id": request_id,
+        "para_name": req.para_name,
+        "para_value": req.para_value,
+        "operator": user["username"],
+        "origin": "user",  # 区分来源（可选）
+        "message": req.message or f"user change {req.para_name} = {req.para_value}",
+        "timestamp": datetime.utcnow().isoformat() + "Z"
+    }
+    publish.single(
+        mqtt_topic,
+        json.dumps(mqtt_payload),
+        hostname=os.getenv("MQTT_HOST"),
+        port=int(os.getenv("MQTT_PORT", "1883"))
+    )
+    return {"status": "ok", "request_id": request_id, "message": req.message}
