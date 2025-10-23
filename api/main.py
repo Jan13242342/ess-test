@@ -1084,10 +1084,10 @@ async def batch_confirm_alarm_by_code(
             text("""
                 UPDATE alarms
                 SET confirmed_at = now(), confirmed_by = :by
-                WHERE device_id = :device_id AND code = :code
-                AND confirmed_at IS NULL
+                WHERE code = :code
+                  AND confirmed_at IS NULL
             """),
-            {"device_id": device_id, "code": data.code, "by": user["username"]}
+            {"code": data.code, "by": user["username"]}
         )
     return {"msg": f"已确认所有 code={data.code} 的报警", "confirmed_count": result.rowcount}
 
@@ -1721,7 +1721,7 @@ async def user_rpc_change(
             """),
             {
                 "device_id": device_id,
-                "operator": user["username"],  # 标记操作人
+                "operator": "user",  # 固定为 user
                 "request_id": request_id,
                 "para_name": req.para_name,
                 "para_value": req.para_value,
@@ -1734,8 +1734,7 @@ async def user_rpc_change(
         "request_id": request_id,
         "para_name": req.para_name,
         "para_value": req.para_value,
-        "operator": user["username"],
-        "origin": "user",  # 区分来源（可选）
+        "operator": "user",  # 固定为 user
         "message": req.message or f"user change {req.para_name} = {req.para_value}",
         "timestamp": datetime.utcnow().isoformat() + "Z"
     }
