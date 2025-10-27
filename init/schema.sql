@@ -287,3 +287,81 @@ CREATE INDEX IF NOT EXISTS idx_admin_audit_log_operator ON admin_audit_log(opera
 CREATE INDEX IF NOT EXISTS idx_admin_audit_log_action ON admin_audit_log(action);
 CREATE INDEX IF NOT EXISTS idx_admin_audit_log_created_at ON admin_audit_log(created_at DESC);
 
+-- 参数模板表：存储设备参数的模板定义
+-- Parameter template table: stores template definitions for device parameters
+CREATE TABLE IF NOT EXISTS para_template (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  device_type   TEXT NOT NULL,
+  para_code     TEXT NOT NULL,
+  para_name     TEXT NOT NULL,
+  data_type     TEXT NOT NULL,   -- int/float/string/bool（客户端校验为主）
+  unit          TEXT,
+  default_value TEXT,
+  min_value     TEXT,
+  max_value     TEXT,
+  editable      BOOLEAN NOT NULL DEFAULT TRUE,
+  group_name    TEXT,            -- 可选：用于前端分组
+  remark        TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_para_template_data_type CHECK (data_type IN ('int','float','string','bool')),
+  CONSTRAINT uq_para_def UNIQUE (device_type, para_code)
+);
+CREATE INDEX IF NOT EXISTS idx_para_template_group ON para_template(device_type, group_name);
+
+-- 国家参数表（与 para_template 列对齐，按国家+设备类型+参数代号逐行定义覆盖值）
+CREATE TABLE IF NOT EXISTS country_para (
+  id BIGSERIAL PRIMARY KEY,
+  country_code  TEXT NOT NULL,                -- 如 CN/DE/US
+  device_type   TEXT NOT NULL,                -- 与 para_template.device_type 对应
+  para_code     TEXT NOT NULL,                -- 与 para_template.para_code 对应
+  para_name     TEXT NOT NULL,                -- 可冗余，便于直接展示（也可由应用层联表获取）
+  data_type     TEXT NOT NULL,                -- int/float/string/bool（校验放后端/客户端）
+  unit          TEXT,
+  default_value TEXT,                         -- 该国家的默认值（用于覆盖模板默认值）
+  min_value     TEXT,                         -- 该国家的范围（如与模板不同）
+  max_value     TEXT,
+  editable      BOOLEAN NOT NULL DEFAULT TRUE,
+  group_name    TEXT,                         -- 可选：前端分组
+  remark        TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_country_para_data_type CHECK (data_type IN ('int','float','string','bool')),
+  CONSTRAINT uq_country_para UNIQUE (country_code, device_type, para_code),
+  CONSTRAINT fk_country_para_template
+    FOREIGN KEY (device_type, para_code)
+    REFERENCES para_template (device_type, para_code)
+    ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_country_para_group
+  ON country_para(country_code, device_type, group_name);
+
+CREATE INDEX IF NOT EXISTS idx_country_para_code
+  ON country_para(country_code, device_type, para_code);
+
+-- 客户端设备参数表：存储客户自定义的设备参数
+CREATE TABLE IF NOT EXISTS customer_para (
+  id BIGSERIAL PRIMARY KEY,
+  user_id       BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  device_type   TEXT NOT NULL,
+  para_code     TEXT NOT NULL,
+  para_name     TEXT NOT NULL,
+  data_type     TEXT NOT NULL,
+  unit          TEXT,
+  default_value TEXT,
+  min_value     TEXT,
+  max_value     TEXT,
+  editable      BOOLEAN NOT NULL DEFAULT TRUE,
+  group_name    TEXT,
+  remark        TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_customer_para_data_type CHECK (data_type IN ('int','float','string','bool')),
+  CONSTRAINT uq_customer_para UNIQUE (user_id, device_type, para_code),
+  CONSTRAINT fk_customer_para_template
+    FOREIGN KEY (device_type, para_code)
+    REFERENCES para_template (device_type, para_code)
+    ON DELETE CASCADE
+);
+
