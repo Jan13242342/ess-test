@@ -1745,3 +1745,48 @@ async def user_rpc_change(
         port=int(os.getenv("MQTT_PORT", "1883"))
     )
     return {"status": "ok", "request_id": request_id, "message": req.message}
+
+# 将统计接口从函数体内移到顶层
+@app.get(
+    "/api/v1/devices/online_summary",
+    tags=["管理员/客服 | Admin/Service"],
+    summary="设备在线统计 | Device Online Summary",
+    description="返回设备总数、在线数、离线数；按最近 fresh_secs 秒内有上报判定为在线。"
+)
+async def devices_online_summary(
+    fresh_secs: Optional[int] = Query(None, ge=1, description="判定在线的秒数，默认使用系统配置"),
+    user=Depends(get_current_user)
+):
+    if user["role"] not in ("admin", "service"):
+        raise HTTPException(status_code=403, detail="无权限")
+
+    fresh = fresh_secs or settings.FRESH_SECS
+
+    async with engine.connect() as conn:
+        total_devices = (await conn.execute(
+            text("SELECT COUNT(*) FROM devices")
+        )).scalar_one()
+
+        online_devices = (await conn.execute(
+            text("""
+                WITH latest AS (
+                  SELECT device_id, MAX(updated_at) AS updated_at
+                  FROM ess_realtime_data
+                  GROUP BY device_id
+                )
+                SELECT COUNT(*)
+                FROM devices d
+                LEFT JOIN latest r ON r.device_id = d.id
+                WHERE r.updated_at IS NOT NULL
+                  AND r.updated_at >= now() - (:fresh || ' seconds')::interval
+            """),
+            {"fresh": fresh}
+        )).scalar_one()
+
+    offline_devices = max(0, int(total_devices) - int(online_devices))
+    return {
+        "total_devices": int(total_devices),
+        "online_devices": int(online_devices),
+        "offline_devices": offline_devices,
+        "fresh_secs": fresh
+    }
