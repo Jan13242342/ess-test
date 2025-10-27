@@ -93,18 +93,19 @@ CREATE INDEX IF NOT EXISTS idx_ess_updated  ON ess_realtime_data (updated_at DES
 -- 历史能耗数据表（分区表）
 -- History energy table (partitioned)
 CREATE TABLE IF NOT EXISTS history_energy (
-  id BIGSERIAL, -- 主键ID / Primary key ID
-  device_id BIGINT NOT NULL REFERENCES devices(id) ON DELETE CASCADE, -- 设备ID / Device ID
-  ts TIMESTAMPTZ NOT NULL, -- 时间戳 / Timestamp
-  charge_wh_total BIGINT, -- 累计充电量 / Total charge (Wh)
-  discharge_wh_total BIGINT, -- 累计放电量 / Total discharge (Wh)
-  pv_wh_total BIGINT, -- 累计光伏发电量 / Total PV (Wh)
-  grid_wh_total BIGINT, -- 累计电网用电量 / Total grid energy (Wh)   -- 可正可负
+  id BIGSERIAL,
+  device_id BIGINT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  ts TIMESTAMPTZ NOT NULL,
+  charge_wh_total BIGINT,
+  discharge_wh_total BIGINT,
+  pv_wh_total BIGINT,
+  grid_wh_total BIGINT,              -- 可正可负（或未来改成 import/export 两列）
+  load_wh_total BIGINT,              -- 新增：家庭/负载累计用电量
   CONSTRAINT pk_history_energy PRIMARY KEY (device_id, ts),
-  CONSTRAINT chk_nonneg_charge CHECK (charge_wh_total IS NULL OR charge_wh_total >= 0),
+  CONSTRAINT chk_nonneg_charge    CHECK (charge_wh_total    IS NULL OR charge_wh_total    >= 0),
   CONSTRAINT chk_nonneg_discharge CHECK (discharge_wh_total IS NULL OR discharge_wh_total >= 0),
-  CONSTRAINT chk_nonneg_pv CHECK (pv_wh_total IS NULL OR pv_wh_total >= 0)
-  -- 不加 grid_wh_total 的非负约束
+  CONSTRAINT chk_nonneg_pv        CHECK (pv_wh_total        IS NULL OR pv_wh_total        >= 0),
+  CONSTRAINT chk_nonneg_load      CHECK (load_wh_total      IS NULL OR load_wh_total      >= 0)
 ) PARTITION BY RANGE (ts);
 
 -- 自动创建本月分区
