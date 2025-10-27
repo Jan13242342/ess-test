@@ -1751,16 +1751,15 @@ async def user_rpc_change(
     "/api/v1/devices/online_summary",
     tags=["管理员/客服 | Admin/Service"],
     summary="设备在线统计 | Device Online Summary",
-    description="返回设备总数、在线数、离线数；按最近 fresh_secs 秒内有上报判定为在线。"
+    description="返回设备总数、在线数、离线数；按最近60秒内有上报判定为在线。"
 )
 async def devices_online_summary(
-    fresh_secs: Optional[int] = Query(None, ge=1, description="判定在线的秒数，默认使用系统配置"),
     user=Depends(get_current_user)
 ):
     if user["role"] not in ("admin", "service"):
         raise HTTPException(status_code=403, detail="无权限")
 
-    fresh = fresh_secs or settings.FRESH_SECS
+    fresh = 60  # 固定60秒
 
     async with engine.connect() as conn:
         total_devices = (await conn.execute(
@@ -1778,7 +1777,7 @@ async def devices_online_summary(
                 FROM devices d
                 LEFT JOIN latest r ON r.device_id = d.id
                 WHERE r.updated_at IS NOT NULL
-                  AND r.updated_at >= now() - (:fresh || ' seconds')::interval
+                  AND r.updated_at >= now() - make_interval(seconds => :fresh)
             """),
             {"fresh": fresh}
         )).scalar_one()
