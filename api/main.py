@@ -1777,7 +1777,7 @@ async def devices_online_summary(
                 FROM devices d
                 LEFT JOIN latest r ON r.device_id = d.id
                 WHERE r.updated_at IS NOT NULL
-                  AND r.updated_at >= now() - make_interval(seconds => :fresh)
+                  AND r.updated_at >= now() - make_interval(secs => :fresh)
             """),
             {"fresh": fresh}
         )).scalar_one()
