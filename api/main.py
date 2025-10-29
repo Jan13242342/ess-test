@@ -427,14 +427,14 @@ class HistoryAggListResponse(BaseModel):
     tags=["用户 | User"],
     summary="历史能耗聚合数据 | Aggregated History Energy Data",
     description="""
-获取当前用户设备的历史能耗聚合数据，支持按小时、天、月聚合，支持时间范围筛选和分页。
+获取当前用户设备的历史能耗聚合数据，支持按固定周期（今天/本周/本月/本季度/本年）或指定日期（按小时）聚合。
 
-Get aggregated historical energy data for user's devices, supports aggregation by hour, day, or month, with time range filter and pagination.
+Get aggregated historical energy data for user's devices, supports aggregation by fixed periods (today/week/month/quarter/year) or by specific date (hourly).
 """
 )
 async def list_history(
-    start: Optional[datetime] = Query(None, description="开始时间（ISO8601，默认当天0点）| Start time (ISO8601, default today 00:00)"),
-    end: Optional[datetime] = Query(None, description="结束时间（ISO8601，默认当天23:59:59）| End time (ISO8601, default today 23:59:59)"),
+    period: str = Query("today", description="聚合周期: today/week/month/quarter/year，默认today | Aggregation period: today/week/month/quarter/year, default today"),
+    date: Optional[date] = Query(None, description="指定日期（YYYY-MM-DD），按该日期按小时聚合，优先于period | Specific date (YYYY-MM-DD), aggregate by hour for that day, takes precedence over period"),
     page: int = Query(1, ge=1, description="页码 | Page number"),
     page_size: int = Query(20, ge=1, le=200, description="每页数量 | Page size"),
     user=Depends(get_current_user)
@@ -443,26 +443,48 @@ async def list_history(
         raise HTTPException(status_code=403, detail="管理员和客服请使用专用接口")
 
     now = datetime.now(timezone.utc)
-    # 判断聚合粒度
-    if not start and not end:
-        # 默认查当天每小时
-        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+    # 如果指定 date，按指定日期按小时聚合
+    if date:
+        start = datetime.combine(date, time.min).replace(tzinfo=timezone.utc)
+        end = datetime.combine(date, time.max).replace(tzinfo=timezone.utc)
         group_expr = "date_trunc('hour', ts)"
         group_label = "hour"
     else:
-        if not start:
+        # 原有 period 逻辑
+        if period == "today":
             start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        if not end:
             end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
-        # 判断是否跨2个月
-        months = (end.year - start.year) * 12 + (end.month - start.month)
-        if months >= 2:
+            group_expr = "date_trunc('hour', ts)"
+            group_label = "hour"
+        elif period == "week":
+            start_of_week = now - timedelta(days=now.weekday())
+            start = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
+            end = start + timedelta(days=6, hours=23, minutes=59, seconds=59, microseconds=999999)
+            group_expr = "date_trunc('day', ts)"
+            group_label = "day"
+        elif period == "month":
+            start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            next_month = (now.replace(day=28) + timedelta(days=4)).replace(day=1)
+            end = next_month - timedelta(seconds=1)
+            group_expr = "date_trunc('day', ts)"
+            group_label = "day"
+        elif period == "quarter":
+            quarter = (now.month - 1) // 3 + 1
+            start_month = (quarter - 1) * 3 + 1
+            start = now.replace(month=start_month, day=1, hour=0, minute=0, second=0, microsecond=0)
+            end_month = quarter * 3
+            next_quarter = start.replace(month=end_month + 1, day=1) if end_month < 12 else start.replace(year=start.year + 1, month=1, day=1)
+            end = next_quarter - timedelta(seconds=1)
+            group_expr = "date_trunc('month', ts)"
+            group_label = "month"
+        elif period == "year":
+            start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+            end = now.replace(month=12, day=31, hour=23, minute=59, second=59, microsecond=999999)
             group_expr = "date_trunc('month', ts)"
             group_label = "month"
         else:
-            group_expr = "date_trunc('day', ts)"
-            group_label = "day"
+            raise HTTPException(status_code=400, detail="无效的 period 值")
 
     async with engine.connect() as conn:
         devices = (await conn.execute(
@@ -533,12 +555,12 @@ async def list_history(
     response_model=HistoryAggListResponse,
     tags=["管理员/客服 | Admin/Service"],
     summary="管理员按设备SN查询历史能耗聚合数据",
-    description="管理员或客服可通过设备SN查询该设备的历史能耗聚合数据，支持时间范围和聚合粒度。"
+    description="管理员或客服可通过设备SN查询该设备的历史能耗聚合数据，支持按固定周期或指定日期（按小时）聚合。"
 )
 async def admin_history_by_sn(
     device_sn: str = Query(..., description="设备序列号"),
-    start: Optional[datetime] = Query(None, description="开始时间"),
-    end: Optional[datetime] = Query(None, description="结束时间"),
+    period: str = Query("today", description="聚合周期: today/week/month/quarter/year，默认today"),
+    date: Optional[date] = Query(None, description="指定日期（YYYY-MM-DD），按该日期按小时聚合，优先于period"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=200, description="每页数量"),
     admin=Depends(get_current_user)
@@ -555,23 +577,46 @@ async def admin_history_by_sn(
         device_id = device_row["id"]
         device_sn_map = {device_id: device_sn}
     now = datetime.now(timezone.utc)
-    if not start and not end:
-        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+    if date:
+        start = datetime.combine(date, time.min).replace(tzinfo=timezone.utc)
+        end = datetime.combine(date, time.max).replace(tzinfo=timezone.utc)
         group_expr = "date_trunc('hour', ts)"
         group_label = "hour"
     else:
-        if not start:
+        # 同上 period 逻辑
+        if period == "today":
             start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        if not end:
             end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
-        months = (end.year - start.year) * 12 + (end.month - start.month)
-        if months >= 2:
+            group_expr = "date_trunc('hour', ts)"
+            group_label = "hour"
+        elif period == "week":
+            start_of_week = now - timedelta(days=now.weekday())
+            start = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
+            end = start + timedelta(days=6, hours=23, minutes=59, seconds=59, microseconds=999999)
+            group_expr = "date_trunc('day', ts)"
+            group_label = "day"
+        elif period == "month":
+            start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            next_month = (now.replace(day=28) + timedelta(days=4)).replace(day=1)
+            end = next_month - timedelta(seconds=1)
+            group_expr = "date_trunc('day', ts)"
+            group_label = "day"
+        elif period == "quarter":
+            quarter = (now.month - 1) // 3 + 1
+            start_month = (quarter - 1) * 3 + 1
+            start = now.replace(month=start_month, day=1, hour=0, minute=0, second=0, microsecond=0)
+            end_month = quarter * 3
+            next_quarter = start.replace(month=end_month + 1, day=1) if end_month < 12 else start.replace(year=start.year + 1, month=1, day=1)
+            end = next_quarter - timedelta(seconds=1)
+            group_expr = "date_trunc('month', ts)"
+            group_label = "month"
+        elif period == "year":
+            start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+            end = now.replace(month=12, day=31, hour=23, minute=59, second=59, microsecond=999999)
             group_expr = "date_trunc('month', ts)"
             group_label = "month"
         else:
-            group_expr = "date_trunc('day', ts)"
-            group_label = "day"
+            raise HTTPException(status_code=400, detail="无效的 period 值")
     params = {"id0": device_id, "start": start, "end": end}
     where = ["device_id = :id0", "ts >= :start", "ts <= :end"]
     cond = "WHERE " + " AND ".join(where)
