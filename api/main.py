@@ -414,6 +414,7 @@ class HistoryDataAgg(BaseModel):
     discharge_wh_total: Optional[int]
     pv_wh_total: Optional[int]
     grid_wh_total: Optional[int]   # 新增
+    load_wh_total: Optional[int]   # 新增：家庭/负载累计用电量
 
 class HistoryAggListResponse(BaseModel):
     items: List[HistoryDataAgg]
@@ -519,7 +520,8 @@ async def list_history(
                 SUM(charge_wh_total) AS charge_wh_total,
                 SUM(discharge_wh_total) AS discharge_wh_total,
                 SUM(pv_wh_total) AS pv_wh_total,
-                SUM(grid_wh_total) AS grid_wh_total      -- 新增
+                SUM(grid_wh_total) AS grid_wh_total,
+                SUM(load_wh_total) AS load_wh_total      -- 新增
             FROM history_energy
             {cond}
             GROUP BY device_id, {group_label}
@@ -637,7 +639,8 @@ async def admin_history_by_sn(
                 SUM(charge_wh_total) AS charge_wh_total,
                 SUM(discharge_wh_total) AS discharge_wh_total,
                 SUM(pv_wh_total) AS pv_wh_total,
-                SUM(grid_wh_total) AS grid_wh_total
+                SUM(grid_wh_total) AS grid_wh_total,
+                SUM(load_wh_total) AS load_wh_total      -- 新增
             FROM history_energy
             {cond}
             GROUP BY device_id, {group_label}
@@ -1816,6 +1819,7 @@ async def devices_online_summary(
                 WITH latest AS (
                   SELECT device_id, MAX(updated_at) AS updated_at
                   FROM ess_realtime_data
+
                   GROUP BY device_id
                 )
                 SELECT COUNT(*)
