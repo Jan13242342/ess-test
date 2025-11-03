@@ -51,7 +51,8 @@ def gen_history_payload(device_id: int, ts: str) -> dict:
         "charge_wh_total": rnd(10000, 50000),
         "discharge_wh_total": rnd(10000, 50000),
         "pv_wh_total": rnd(10000, 50000),
-        "grid_wh_total": rnd(-20000, 20000)  # 新增，允许正负
+        "grid_wh_total": rnd(-20000, 20000),  # 新增，允许正负
+        "load_wh_total": rnd(10000, 50000)    # 新增：家庭/负载累计用电量
     }
 
 def gen_alarm_payload(device_id: int, status: str) -> dict:

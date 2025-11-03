@@ -141,15 +141,16 @@ history_q: Queue[dict] = Queue(maxsize=QUEUE_MAXSIZE)
 
 HISTORY_UPSERT_SQL = """
 INSERT INTO history_energy (
-  device_id, ts, charge_wh_total, discharge_wh_total, pv_wh_total, grid_wh_total
+  device_id, ts, charge_wh_total, discharge_wh_total, pv_wh_total, grid_wh_total, load_wh_total
 ) VALUES (
-  %(device_id)s, %(ts)s, %(charge_wh_total)s, %(discharge_wh_total)s, %(pv_wh_total)s, %(grid_wh_total)s
+  %(device_id)s, %(ts)s, %(charge_wh_total)s, %(discharge_wh_total)s, %(pv_wh_total)s, %(grid_wh_total)s, %(load_wh_total)s
 )
 ON CONFLICT (device_id, ts) DO UPDATE SET
   charge_wh_total=EXCLUDED.charge_wh_total,
   discharge_wh_total=EXCLUDED.discharge_wh_total,
   pv_wh_total=EXCLUDED.pv_wh_total,
-  grid_wh_total=EXCLUDED.grid_wh_total;
+  grid_wh_total=EXCLUDED.grid_wh_total,
+  load_wh_total=EXCLUDED.load_wh_total;
 """
 
 def normalize_history(sn: str, payload: dict) -> dict:
@@ -160,6 +161,7 @@ def normalize_history(sn: str, payload: dict) -> dict:
         "discharge_wh_total": int(payload.get("discharge_wh_total", 0)),
         "pv_wh_total": int(payload.get("pv_wh_total", 0)),
         "grid_wh_total": int(payload.get("grid_wh_total", 0)),  # 新增
+        "load_wh_total": int(payload.get("load_wh_total", 0))  # 新增
     }
 
 # 新增报警topic和队列

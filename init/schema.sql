@@ -127,18 +127,27 @@ $$;
 -- Enable pg_cron extension
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 
--- 自动创建下月分区的函数
--- Function to auto create next month's partition
+
+-- 自动创建本月和下月分区的函数
+-- Function to auto create this month's and next month's partitions
 CREATE OR REPLACE FUNCTION create_next_history_energy_partition()
 RETURNS void AS $$
 DECLARE
+  this_month date := date_trunc('month', now());
   next_month date := date_trunc('month', now()) + interval '1 month';
   next_next_month date := date_trunc('month', now()) + interval '2 month';
-  partition_name text := 'history_energy_' || to_char(next_month, 'YYYY_MM');
+  this_partition_name text := 'history_energy_' || to_char(this_month, 'YYYY_MM');
+  next_partition_name text := 'history_energy_' || to_char(next_month, 'YYYY_MM');
 BEGIN
+  -- 创建本月分区（如果不存在）
   EXECUTE format(
     'CREATE TABLE IF NOT EXISTS %I PARTITION OF history_energy FOR VALUES FROM (%L) TO (%L);',
-    partition_name, next_month, next_next_month
+    this_partition_name, this_month, next_month
+  );
+  -- 创建下月分区（如果不存在）
+  EXECUTE format(
+    'CREATE TABLE IF NOT EXISTS %I PARTITION OF history_energy FOR VALUES FROM (%L) TO (%L);',
+    next_partition_name, next_month, next_next_month
   );
 END;
 $$ LANGUAGE plpgsql;
@@ -150,6 +159,8 @@ SELECT cron.schedule(
   '0 0 1 * *',
   'SELECT create_next_history_energy_partition();'
 );
+
+
 
 -- 初始化2个超级管理员和5个客服
 INSERT INTO users (username, email, password_hash, role) VALUES
