@@ -548,6 +548,25 @@ def archive_alarm_worker():
         except:
             pass
 
+def on_connect(client, userdata, flags, rc, properties=None):
+    # 兼容 paho v1/v2 回调签名
+    try:
+        code = rc if isinstance(rc, int) else int(getattr(rc, "value", rc))
+    except Exception:
+        code = rc
+    if code == 0:
+        log("[mqtt] connected")
+        # 连接/重连时订阅所有需要的主题
+        client.subscribe(MQTT_TOPIC, MQTT_QOS)         # realtime
+        client.subscribe(HISTORY_TOPIC, MQTT_QOS)      # history
+        client.subscribe(ALARM_TOPIC, MQTT_QOS)        # alarm
+        client.subscribe(PARA_TOPIC, MQTT_QOS)         # para
+        client.subscribe(RPC_ACK_TOPIC, MQTT_QOS)      # rpc_ack
+        log("[mqtt] subscribed:",
+            MQTT_TOPIC, HISTORY_TOPIC, ALARM_TOPIC, PARA_TOPIC, RPC_ACK_TOPIC)
+    else:
+        log(f"[mqtt] connect failed rc={code}")
+
 def main():
     t = Thread(target=flusher, daemon=True); t.start()
     ht = Thread(target=history_flusher, daemon=True); ht.start()
