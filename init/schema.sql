@@ -222,7 +222,7 @@ CREATE TABLE IF NOT EXISTS device_rpc_change_log (
   para_name TEXT NOT NULL,                 -- 参数名
   para_value TEXT NOT NULL,                -- 参数值（可用JSON存储复杂类型）
   status TEXT NOT NULL DEFAULT 'pending',  -- pending/success/failed/error/timeout
-  message TEXT,                            -- 确认消息（设备回复的详细信息）
+  message TEXT,                            -- 消息           -- 回复消息
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   confirmed_at TIMESTAMPTZ
 );
