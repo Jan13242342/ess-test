@@ -154,14 +154,18 @@ ON CONFLICT (device_id, ts) DO UPDATE SET
 """
 
 def normalize_history(sn: str, payload: dict) -> dict:
+    # 如果 payload 中没有 ts，使用当前时间
+    ts = payload.get("ts")
+    if not ts:
+        ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     return {
         "device_id": int(sn),
-        "ts": payload.get("ts"),
+        "ts": ts,
         "charge_wh_total": int(payload.get("charge_wh_total", 0)),
         "discharge_wh_total": int(payload.get("discharge_wh_total", 0)),
         "pv_wh_total": int(payload.get("pv_wh_total", 0)),
-        "grid_wh_total": int(payload.get("grid_wh_total", 0)),  # 新增
-        "load_wh_total": int(payload.get("load_wh_total", 0))  # 新增
+        "grid_wh_total": int(payload.get("grid_wh_total", 0)),
+        "load_wh_total": int(payload.get("load_wh_total", 0))
     }
 
 # 新增报警topic和队列

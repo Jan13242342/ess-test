@@ -47,7 +47,6 @@ def gen_payload(device_id: int) -> dict:
 def gen_history_payload(device_id: int, ts: str) -> dict:
     return {
         "device_id": device_id,
-        "ts": ts,  # ISO格式时间字符串
         "charge_wh_total": rnd(10000, 50000),
         "discharge_wh_total": rnd(10000, 50000),
         "pv_wh_total": rnd(10000, 50000),
