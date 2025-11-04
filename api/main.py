@@ -122,9 +122,9 @@ async def list_realtime(
     fresh_secs: Optional[int] = Query(None, description="判定在线的秒数，默认60秒 | Seconds to judge online, default 60s"),
     user=Depends(get_current_user)
 ):
-    # 只允许普通用户访问，管理员和客服不用这个接口
-    if user["role"] in ("admin", "service"):
-        raise HTTPException(status_code=403, detail="管理员和客服请使用专用接口")
+    # 只允许普通用户访问，管理员/客服/支持请使用专用接口
+    if user["role"] in ("admin", "service", "support"):
+        raise HTTPException(status_code=403, detail="管理员/客服/支持请使用专用接口")
     fresh = fresh_secs or settings.FRESH_SECS
     where = ["d.user_id = :user_id"]
     params = {"user_id": user["user_id"]}
@@ -171,7 +171,7 @@ async def get_realtime_by_sn(
     user=Depends(get_current_user)
 ):
     # 只允许管理员和客服访问
-    if user["role"] not in ("admin", "service"):
+    if user["role"] not in ("admin", "service", "support"):
         raise HTTPException(status_code=403, detail="无权限")
     # 查找设备ID和实时数据
     sql = text(f"""
@@ -301,6 +301,13 @@ async def bind_device(
     username: str = Body(..., embed=True, description="用户名 | Username"),
     user=Depends(get_current_user)
 ):
+    # 权限校验：仅 admin/service 可操作任意账号；普通 user 只能操作自己的账号；support 禁止
+    if user["role"] in ("admin", "service"):
+        pass
+    elif user["role"] == "user" and username == user["username"]:
+        pass
+    else:
+        raise HTTPException(status_code=403, detail="无权限绑定此用户的设备")
     async with engine.begin() as conn:
         result = await conn.execute(
             text("SELECT id FROM users WHERE username=:username"),
@@ -363,6 +370,13 @@ async def unbind_device(
     username: str = Body(..., embed=True, description="用户名 | Username"),
     user=Depends(get_current_user)
 ):
+    # 权限校验：仅 admin/service 可操作任意账号；普通 user 只能操作自己的账号；support 禁止
+    if user["role"] in ("admin", "service"):
+        pass
+    elif user["role"] == "user" and username == user["username"]:
+        pass
+    else:
+        raise HTTPException(status_code=403, detail="无权限解绑此用户的设备")
     async with engine.begin() as conn:
         result = await conn.execute(
             text("SELECT id FROM users WHERE username=:username"),
@@ -440,8 +454,8 @@ async def list_history(
     page_size: int = Query(20, ge=1, le=200, description="每页数量 | Page size"),
     user=Depends(get_current_user)
 ):
-    if user["role"] in ("admin", "service"):
-        raise HTTPException(status_code=403, detail="管理员和客服请使用专用接口")
+    if user["role"] in ("admin", "service", "support"):
+        raise HTTPException(status_code=403, detail="管理员/客服/支持请使用专用接口")
 
     now = datetime.now(timezone.utc)
 
@@ -567,7 +581,7 @@ async def admin_history_by_sn(
     page_size: int = Query(20, ge=1, le=200, description="每页数量"),
     admin=Depends(get_current_user)
 ):
-    if admin["role"] not in ("admin", "service"):
+    if admin["role"] not in ("admin", "service", "support"):
         raise HTTPException(status_code=403, detail="无权限")
     async with engine.connect() as conn:
         device_row = (await conn.execute(
@@ -621,7 +635,7 @@ async def admin_history_by_sn(
             raise HTTPException(status_code=400, detail="无效的 period 值")
     params = {"id0": device_id, "start": start, "end": end}
     where = ["device_id = :id0", "ts >= :start", "ts <= :end"]
-    cond = "WHERE " + " AND ".join(where)
+    cond = "WHERE " + " AND ".join(where) if where else ""
     offset = (page - 1) * page_size
     async with engine.connect() as conn:
         count_sql = text(f"""
@@ -947,8 +961,8 @@ async def list_my_alarms(
     code: Optional[str] = Query(None),
     user=Depends(get_current_user)
 ):
-    if user["role"] in ("admin", "service"):
-        raise HTTPException(status_code=403, detail="管理员/客服请用专用接口")
+    if user["role"] in ("admin", "service", "support"):
+        raise HTTPException(status_code=403, detail="管理员/客服/支持请用专用接口")
     async with engine.connect() as conn:
         devices = (await conn.execute(
             text("SELECT id FROM devices WHERE user_id=:uid"),
@@ -1005,8 +1019,8 @@ async def list_my_alarm_history(
     code: Optional[str] = Query(None),
     user=Depends(get_current_user)
 ):
-    if user["role"] in ("admin", "service"):
-        raise HTTPException(status_code=403, detail="管理员/客服请用专用接口")
+    if user["role"] in ("admin", "service", "support"):
+        raise HTTPException(status_code=403, detail="管理员/客服/支持请用专用接口")
     async with engine.connect() as conn:
         devices = (await conn.execute(
             text("SELECT id FROM devices WHERE user_id=:uid"),
@@ -1150,7 +1164,7 @@ async def batch_confirm_alarm_by_code(
 async def count_unhandled_alarms(
     user=Depends(get_current_user)
 ):
-    if user["role"] not in ("admin", "service"):
+    if user["role"] not in ("admin", "service", "support"):
         raise HTTPException(status_code=403, detail="无权限")
     async with engine.connect() as conn:
         # 总数
@@ -1183,7 +1197,7 @@ async def get_device_para(
     device_sn: str = Query(..., description="设备序列号"),
     user=Depends(get_current_user)
 ):
-    if user["role"] not in ("admin", "service"):
+    if user["role"] not in ("admin", "service", "support"):
         raise HTTPException(status_code=403, detail="无权限")
     async with engine.connect() as conn:
         device_row = (await conn.execute(
@@ -1296,7 +1310,7 @@ async def get_rpc_history(
     page_size: int = Query(20, ge=1, le=200),
     user=Depends(get_current_user)
 ):
-    if user["role"] not in ("admin", "service"):
+    if user["role"] not in ("admin", "service", "support"):
         raise HTTPException(status_code=403, detail="无权限")
     where = []
     params = {}
@@ -1732,13 +1746,12 @@ USER_RPC_ALLOWED = {"control_mode"}
     description="普通用户仅可对自己名下设备发起 RPC 请求（参数白名单：control_mode）。"
 )
 async def user_rpc_change(
-    req: RPCChangeRequest,            # 复用已有模型
+    req: RPCChangeRequest,
     user=Depends(get_current_user)
 ):
     # 仅普通用户
-    if user["role"] in ("admin", "service"):
-        raise HTTPException(status_code=403, detail="管理员/客服请使用管理员接口")
-
+    if user["role"] in ("admin", "service", "support"):
+        raise HTTPException(status_code=403, detail="管理员/客服/支持请使用管理员接口")
     # 参数白名单校验（仅允许 control_mode）
     if req.para_name not in USER_RPC_ALLOWED:
         raise HTTPException(status_code=403, detail=f"不允许修改参数: {req.para_name}")
@@ -1804,7 +1817,7 @@ async def user_rpc_change(
 async def devices_online_summary(
     user=Depends(get_current_user)
 ):
-    if user["role"] not in ("admin", "service"):
+    if user["role"] not in ("admin", "service", "support"):
         raise HTTPException(status_code=403, detail="无权限")
 
     fresh = 60  # 固定60秒
