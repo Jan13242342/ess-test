@@ -958,7 +958,7 @@ async def list_my_alarms(
     page_size: int = Query(20, ge=1, le=200),
     status: Optional[str] = Query(None),
     level: Optional[str] = Query(None),
-    code: Optional[str] = Query(None),
+    code: Optional[int] = Query(None),
     user=Depends(get_current_user)
 ):
     if user["role"] in ("admin", "service", "support"):
@@ -1016,7 +1016,7 @@ async def list_my_alarm_history(
     page_size: int = Query(20, ge=1, le=200),
     status: Optional[str] = Query(None),
     level: Optional[str] = Query(None),
-    code: Optional[str] = Query(None),
+    code: Optional[int] = Query(None),
     user=Depends(get_current_user)
 ):
     if user["role"] in ("admin", "service", "support"):
@@ -1075,7 +1075,7 @@ async def list_all_alarms(
     status: Optional[str] = Query(None),
     device_sn: Optional[str] = Query(None),
     level: Optional[str] = Query(None),
-    code: Optional[str] = Query(None),
+    code: Optional[int] = Query(None),
     alarm_type: Optional[str] = Query(None),
     user=Depends(get_current_user)
 ):
@@ -1083,9 +1083,9 @@ async def list_all_alarms(
         raise HTTPException(status_code=403, detail="无权限")
     where = []
     params = {}
-    join_sql = ""
+    # 始终关联 devices，便于选择 d.device_sn 且避免未 join 报错
+    join_sql = "LEFT JOIN devices d ON alarms.device_id = d.id"
     if device_sn:
-        join_sql = "JOIN devices d ON alarms.device_id = d.id"
         where.append("d.device_sn = :device_sn")
         params["device_sn"] = device_sn
     if status:
