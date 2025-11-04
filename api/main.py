@@ -1065,7 +1065,7 @@ async def list_all_alarms(
     alarm_type: Optional[str] = Query(None),
     user=Depends(get_current_user)
 ):
-    if user["role"] not in ("admin", "service"):
+    if user["role"] not in ("admin", "service", "support"):
         raise HTTPException(status_code=403, detail="无权限")
     where = []
     params = {}

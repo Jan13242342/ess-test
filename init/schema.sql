@@ -170,7 +170,12 @@ INSERT INTO users (username, email, password_hash, role) VALUES
   ('service2', 'service2@example.com', '$2b$12$MQtJ8NIlVywD69WqqldUlOttvE2DKE.k44WFniAzLa6aCjMpzv.G.', 'service'),
   ('service3', 'service3@example.com', '$2b$12$MQtJ8NIlVywD69WqqldUlOttvE2DKE.k44WFniAzLa6aCjMpzv.G.', 'service'),
   ('service4', 'service4@example.com', '$2b$12$MQtJ8NIlVywD69WqqldUlOttvE2DKE.k44WFniAzLa6aCjMpzv.G.', 'service'),
-  ('service5', 'service5@example.com', '$2b$12$MQtJ8NIlVywD69WqqldUlOttvE2DKE.k44WFniAzLa6aCjMpzv.G.', 'service')
+  ('service5', 'service5@example.com', '$2b$12$MQtJ8NIlVywD69WqqldUlOttvE2DKE.k44WFniAzLa6aCjMpzv.G.', 'service')，
+  ('support1', 'support1@example.com', '$2b$12$MQtJ8NIlVywD69WqqldUlOttvE2DKE.k44WFniAzLa6aCjMpzv.G.', 'support'),
+  ('support2', 'support2@example.com', '$2b$12$MQtJ8NIlVywD69WqqldUlOttvE2DKE.k44WFniAzLa6aCjMpzv.G.', 'support'),
+  ('support3', 'support3@example.com', '$2b$12$MQtJ8NIlVywD69WqqldUlOttvE2DKE.k44WFniAzLa6aCjMpzv.G.', 'support'),
+  ('support4', 'support4@example.com', '$2b$12$MQtJ8NIlVywD69WqqldUlOttvE2DKE.k44WFniAzLa6aCjMpzv.G.', 'support'),
+  ('support5', 'support5@example.com', '$2b$12$MQtJ8NIlVywD69WqqldUlOttvE2DKE.k44WFniAzLa6aCjMpzv.G.', 'support')
 ON CONFLICT DO NOTHING;
 
 -- 启用pg_stat_statements扩展
