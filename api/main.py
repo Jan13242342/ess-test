@@ -951,6 +951,11 @@ class AlarmListResponse(BaseModel):
     page_size: int
     total: int
 
+# 批量按 code 确认报警的请求模型
+class AlarmBatchConfirmByCodeRequest(BaseModel):
+    code: int = Field(..., description="报警码 | Alarm code")
+
+
 # 查询当前报警（alarms）
 @app.get(
     "/api/v1/alarms/user",
