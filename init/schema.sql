@@ -382,3 +382,37 @@ CREATE TABLE IF NOT EXISTS customer_para (
     ON DELETE CASCADE
 );
 
+-- 固件文件表：存储设备固件文件信息
+-- Firmware files table: stores device firmware file information
+CREATE TABLE IF NOT EXISTS firmware_files (
+  id BIGSERIAL PRIMARY KEY,
+  device_type TEXT NOT NULL CHECK (device_type <> ''),
+  version TEXT NOT NULL CHECK (version ~ '^\d+(\.\d+){0,2}$'), -- 1 or 1.2 or 1.2.3
+  filename TEXT NOT NULL CHECK (filename ~* '\.bin$'),
+  file_size INT NOT NULL CHECK (file_size > 0),
+  md5 TEXT NOT NULL CHECK (md5 ~ '^[0-9a-f]{32}$'),
+  notes TEXT,
+  uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  uploaded_by TEXT NOT NULL CHECK (uploaded_by <> ''),
+  UNIQUE (device_type, version)
+);
+
+-- 用于列表/最新：设备类型 + 上传时间倒序
+CREATE INDEX IF NOT EXISTS idx_fw_type_uploaded_at
+  ON firmware_files (device_type, uploaded_at DESC);
+
+-- 语义版本排序索引：加速“取最新版本”的 ORDER BY
+-- 与查询中相同的表达式，便于被使用
+CREATE INDEX IF NOT EXISTS idx_fw_type_semver_desc
+  ON firmware_files (
+    device_type,
+    COALESCE(NULLIF(split_part(version, '.', 1), ''), '0')::int DESC,
+    COALESCE(NULLIF(split_part(version, '.', 2), ''), '0')::int DESC,
+    COALESCE(NULLIF(split_part(version, '.', 3), ''), '0')::int DESC,
+    uploaded_at DESC
+  );
+
+-- 说明：
+-- 1) UNIQUE(device_type, version) 自带唯一索引，无需重复建索引。
+-- 2) 如按 filename 查询下载，可选：CREATE INDEX IF NOT EXISTS idx_fw_filename ON firmware_files(filename);
+
