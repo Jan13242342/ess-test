@@ -1,7 +1,7 @@
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import APIRouter, Query, HTTPException, Depends
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import text
 from deps import get_current_user
 from main import engine, async_session, settings, online_flag, COLUMNS
@@ -58,6 +58,12 @@ class ListResponse(BaseModel):
     page: int
     page_size: int
     total: int
+
+class BindDeviceRequest(BaseModel):
+    device_sn: str = Field(..., description="设备序列号 | Device SN")
+
+class UnbindDeviceRequest(BaseModel):
+    device_sn: str = Field(..., description="设备序列号 | Device SN")
 
 @router.post("/register", summary="用户注册")
 async def register(user: UserRegister):
@@ -153,3 +159,51 @@ async def list_realtime(
         d["online"] = online_flag(d["updated_at"], fresh)
         items.append(d)
     return {"items": items, "page": page, "page_size": page_size, "total": total}
+
+@router.post("/device/bind", summary="绑定设备 | Bind Device", tags=["用户 | User"])
+async def bind_device(data: BindDeviceRequest, user=Depends(get_current_user)):
+    if user["role"] != "user":
+        raise HTTPException(status_code=403, detail="权限错误")
+    async with async_session() as session:
+        async with session.begin():
+            # 行级锁避免并发抢占
+            row = (await session.execute(
+                text("SELECT id, user_id FROM devices WHERE device_sn=:sn FOR UPDATE"),
+                {"sn": data.device_sn}
+            )).mappings().first()
+            if not row:
+                raise HTTPException(status_code=404, detail="设备不存在")
+            if row["user_id"] is None:
+                await session.execute(
+                    text("UPDATE devices SET user_id=:uid WHERE id=:id"),
+                    {"uid": user["user_id"], "id": row["id"]}
+                )
+                return {"msg": "绑定成功", "device_sn": data.device_sn}
+            if row["user_id"] == user["user_id"]:
+                return {"msg": "设备已绑定到当前用户", "device_sn": data.device_sn}
+            raise HTTPException(status_code=409, detail="设备已绑定到其他用户")
+
+@router.post("/device/unbind", summary="解绑设备 | Unbind Device", tags=["用户 | User"])
+async def unbind_device(data: UnbindDeviceRequest, user=Depends(get_current_user)):
+    if user["role"] != "user":
+        raise HTTPException(status_code=403, detail="权限错误")
+    async with async_session() as session:
+        async with session.begin():
+            result = await session.execute(
+                text("""
+                    UPDATE devices
+                    SET user_id = NULL
+                    WHERE device_sn=:sn AND user_id=:uid
+                """),
+                {"sn": data.device_sn, "uid": user["user_id"]}
+            )
+            if result.rowcount == 0:
+                # 设备不存在或不属于当前用户
+                owned = (await session.execute(
+                    text("SELECT 1 FROM devices WHERE device_sn=:sn"),
+                    {"sn": data.device_sn}
+                )).first()
+                if not owned:
+                    raise HTTPException(status_code=404, detail="设备不存在")
+                raise HTTPException(status_code=403, detail="设备不属于当前用户")
+            return {"msg": "解绑成功", "device_sn": data.device_sn}
