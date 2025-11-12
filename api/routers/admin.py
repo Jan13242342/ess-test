@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from datetime import datetime, timezone
 from ..deps import get_current_user
-from ..main import engine, COLUMNS, online_flag, settings
+from main import engine, async_session, settings, online_flag, COLUMNS
 
 router = APIRouter(prefix="/api/v1/admin", tags=["管理员/客服 | Admin/Service"])
 

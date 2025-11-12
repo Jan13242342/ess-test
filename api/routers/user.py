@@ -6,7 +6,7 @@ from fastapi import APIRouter, Query, HTTPException, Depends
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import text
 from ..deps import get_current_user
-from ..main import engine, async_session, settings, online_flag, COLUMNS
+from main import engine, async_session, settings, online_flag, COLUMNS
 import bcrypt, jwt, os
 
 JWT_SECRET = os.getenv("JWT_SECRET", "your_jwt_secret_key")

@@ -21,7 +21,7 @@ import uuid
 import paho.mqtt.publish as publish
 import hashlib
 
-from .deps import get_current_user
+from deps import get_current_user
 
 class Settings(BaseSettings):
     DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://admin:123456@pgbouncer:6432/energy")
@@ -56,7 +56,7 @@ def online_flag(updated_at: datetime, fresh_secs: int) -> bool:
     return (datetime.now(timezone.utc) - updated_at) <= timedelta(seconds=fresh_secs)
 
 # ---------------- 挂载拆分后的路由 ----------------
-from .routers import user as user_router, admin as admin_router
+from routers import user as user_router, admin as admin_router
 app.include_router(user_router.router)
 app.include_router(admin_router.router)
 
@@ -1629,4 +1629,20 @@ async def list_firmware(
 ):
     if user["role"] not in ("admin", "service", "support"):
         raise HTTPException(status_code=403, detail="无权限")
-    offset = (page - 1)
+    offset = (page - 1) * page_size
+    async with engine.connect() as conn:
+        count_sql = text(f"""
+            SELECT COUNT(*) FROM firmware_files
+            WHERE device_type = :device_type
+        """)
+        total = (await conn.execute(count_sql, {"device_type": device_type})).scalar_one()
+        query_sql = text(f"""
+            SELECT device_type, version, filename, file_size, md5, notes, uploaded_at
+            FROM firmware_files
+            WHERE device_type = :device_type
+            ORDER BY uploaded_at DESC
+            LIMIT :limit OFFSET :offset
+        """)
+        rows = (await conn.execute(query_sql, {"device_type": device_type, "limit": page_size, "offset": offset})).mappings().all()
+    items = [dict(row) for row in rows]
+    return {"items": items, "page": page, "page_size": page_size, "total": total}
