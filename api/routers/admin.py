@@ -1,10 +1,7 @@
-```python
-// filepath: c:\Users\orson\Desktop\New folder\ess-test\api\routers\admin.py
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
-from datetime import datetime, timezone
-from ..deps import get_current_user
-from main import engine, async_session, settings, online_flag, COLUMNS
+from deps import get_current_user
+from main import engine, settings, online_flag, COLUMNS
 
 router = APIRouter(prefix="/api/v1/admin", tags=["管理员/客服 | Admin/Service"])
 
@@ -25,4 +22,3 @@ async def get_realtime_by_sn(device_sn: str, user=Depends(get_current_user)):
     d = dict(row)
     d["online"] = online_flag(d["updated_at"], settings.FRESH_SECS)
     return d
-```

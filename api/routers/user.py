@@ -1,11 +1,9 @@
-```python
-// filepath: c:\Users\orson\Desktop\New folder\ess-test\api\routers\user.py
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import APIRouter, Query, HTTPException, Depends
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import text
-from ..deps import get_current_user
+from deps import get_current_user
 from main import engine, async_session, settings, online_flag, COLUMNS
 import bcrypt, jwt, os
 
@@ -155,4 +153,3 @@ async def list_realtime(
         d["online"] = online_flag(d["updated_at"], fresh)
         items.append(d)
     return {"items": items, "page": page, "page_size": page_size, "total": total}
-```
