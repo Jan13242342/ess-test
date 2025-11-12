@@ -62,7 +62,7 @@ app.include_router(admin_router.router)
 
 # 管理员/客服共用：根据设备SN获取实时数据
 @app.get(
-    "/api/v1/admin/realtime/by_sn/{device_sn}",
+    "/api/v1/realtime/by_sn/{device_sn}",
     tags=["管理员/客服 | Admin/Service"],
     summary="根据设备SN获取实时数据 | Get Realtime Data by Device SN"
 )
