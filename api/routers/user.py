@@ -65,6 +65,11 @@ class BindDeviceRequest(BaseModel):
 class UnbindDeviceRequest(BaseModel):
     device_sn: str = Field(..., description="设备序列号 | Device SN")
 
+# 新增：修改密码请求模型
+class ChangePasswordRequest(BaseModel):
+    old_password: str = Field(..., min_length=6, description="旧密码 | Old password")
+    new_password: str = Field(..., min_length=6, description="新密码 | New password")
+
 @router.post("/register", summary="用户注册")
 async def register(user: UserRegister):
     async with async_session() as session:
@@ -207,3 +212,52 @@ async def unbind_device(data: UnbindDeviceRequest, user=Depends(get_current_user
                     raise HTTPException(status_code=404, detail="设备不存在")
                 raise HTTPException(status_code=403, detail="设备不属于当前用户")
             return {"msg": "解绑成功", "device_sn": data.device_sn}
+
+# 新增：修改密码
+@router.post("/user/change_password", summary="修改密码 | Change Password", tags=["用户 | User"])
+async def change_password(data: ChangePasswordRequest, user=Depends(get_current_user)):
+    if user["role"] != "user":
+        raise HTTPException(status_code=403, detail="权限错误")
+    async with async_session() as session:
+        row = (await session.execute(
+            text("SELECT password_hash FROM users WHERE id=:uid"),
+            {"uid": user["user_id"]}
+        )).first()
+        if not row:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        if not bcrypt.checkpw(data.old_password.encode(), row.password_hash.encode()):
+            raise HTTPException(status_code=400, detail="旧密码不正确")
+        new_hash = bcrypt.hashpw(data.new_password.encode(), bcrypt.gensalt()).decode()
+        await session.execute(
+            text("UPDATE users SET password_hash=:ph WHERE id=:uid"),
+            {"ph": new_hash, "uid": user["user_id"]}
+        )
+        await session.commit()
+    return {"msg": "修改成功"}
+
+# 新增：我的设备列表（分页）
+@router.get("/user/devices", summary="我的设备列表 | My Devices", tags=["用户 | User"])
+async def list_my_devices(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    user=Depends(get_current_user)
+):
+    if user["role"] != "user":
+        raise HTTPException(status_code=403, detail="权限错误")
+    offset = (page - 1) * page_size
+    async with async_session() as session:
+        total = (await session.execute(
+            text("SELECT COUNT(*) FROM devices WHERE user_id=:uid"),
+            {"uid": user["user_id"]}
+        )).scalar_one()
+        rows = (await session.execute(
+            text("""
+                SELECT id, device_sn
+                FROM devices
+                WHERE user_id=:uid
+                ORDER BY id DESC
+                LIMIT :limit OFFSET :offset
+            """),
+            {"uid": user["user_id"], "limit": page_size, "offset": offset}
+        )).mappings().all()
+    return {"items": rows, "page": page, "page_size": page_size, "total": total}
