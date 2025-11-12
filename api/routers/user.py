@@ -1,11 +1,12 @@
-from datetime import datetime, timezone, timedelta
-from typing import Optional, List
-from fastapi import APIRouter, Query, HTTPException, Depends
+from datetime import datetime, timezone, timedelta, date
+from datetime import time as dtime
+from typing import Optional, List, Any
 from pydantic import BaseModel, EmailStr, Field
+import os, bcrypt, jwt, json, time as ttime, random, string
+import paho.mqtt.publish as publish
 from sqlalchemy import text
 from deps import get_current_user
 from main import engine, async_session, settings, online_flag, COLUMNS
-import bcrypt, jwt, os
 
 JWT_SECRET = os.getenv("JWT_SECRET", "your_jwt_secret_key")
 JWT_ALGORITHM = "HS256"
@@ -261,3 +262,345 @@ async def list_my_devices(
             {"uid": user["user_id"], "limit": page_size, "offset": offset}
         )).mappings().all()
     return {"items": rows, "page": page, "page_size": page_size, "total": total}
+
+# 历史能耗聚合 - 响应模型
+class HistoryDataAgg(BaseModel):
+    device_id: int
+    device_sn: str
+    day: Optional[date] = None
+    hour: Optional[datetime] = None
+    month: Optional[date] = None
+    charge_wh_total: Optional[int]
+    discharge_wh_total: Optional[int]
+    pv_wh_total: Optional[int]
+    grid_wh_total: Optional[int]
+    load_wh_total: Optional[int]
+
+class HistoryAggListResponse(BaseModel):
+    items: List[HistoryDataAgg]
+    page: int
+    page_size: int
+    total: int
+
+@router.get(
+    "/history",
+    response_model=HistoryAggListResponse,
+    tags=["用户 | User"],
+    summary="历史能耗聚合数据 | Aggregated History Energy Data",
+)
+async def list_history(
+    period: str = Query("today", description="today/week/month/quarter/year"),
+    date: Optional[date] = Query(None, description="YYYY-MM-DD, 小时级聚合"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    user=Depends(get_current_user)
+):
+    if user["role"] in ("admin", "service", "support"):
+        raise HTTPException(status_code=403, detail="管理员/客服/支持请使用专用接口")
+
+    now = datetime.now(timezone.utc)
+    if date:
+        start = datetime.combine(date, dtime.min).replace(tzinfo=timezone.utc)
+        end = datetime.combine(date, dtime.max).replace(tzinfo=timezone.utc)
+        group_expr, group_label = "date_trunc('hour', ts)", "hour"
+    else:
+        if period == "today":
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+            group_expr, group_label = "date_trunc('hour', ts)", "hour"
+        elif period == "week":
+            start_of_week = now - timedelta(days=now.weekday())
+            start = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
+            end = start + timedelta(days=6, hours=23, minutes=59, seconds=59, microseconds=999999)
+            group_expr, group_label = "date_trunc('day', ts)", "day"
+        elif period == "month":
+            start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            next_month = (now.replace(day=28) + timedelta(days=4)).replace(day=1)
+            end = next_month - timedelta(seconds=1)
+            group_expr, group_label = "date_trunc('day', ts)", "day"
+        elif period == "quarter":
+            quarter = (now.month - 1) // 3 + 1
+            start_month = (quarter - 1) * 3 + 1
+            start = now.replace(month=start_month, day=1, hour=0, minute=0, second=0, microsecond=0)
+            end_month = quarter * 3
+            next_quarter = start.replace(month=end_month + 1, day=1) if end_month < 12 else start.replace(year=start.year + 1, month=1, day=1)
+            end = next_quarter - timedelta(seconds=1)
+            group_expr, group_label = "date_trunc('month', ts)", "month"
+        elif period == "year":
+            start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+            end = now.replace(month=12, day=31, hour=23, minute=59, second=59, microsecond=999999)
+            group_expr, group_label = "date_trunc('month', ts)", "month"
+        else:
+            raise HTTPException(status_code=400, detail="无效的 period 值")
+
+    async with engine.connect() as conn:
+        devices = (await conn.execute(
+            text("SELECT id, device_sn FROM devices WHERE user_id=:uid"),
+            {"uid": user["user_id"]}
+        )).mappings().all()
+        if not devices:
+            return {"items": [], "page": page, "page_size": page_size, "total": 0}
+
+        device_ids = [d["id"] for d in devices]
+        device_sn_map = {d["id"]: d["device_sn"] for d in devices}
+        placeholders = ",".join([f":id{i}" for i in range(len(device_ids))])
+        params = {f"id{i}": did for i, did in enumerate(device_ids)}
+        params.update({"start": start, "end": end})
+
+        where = [f"device_id IN ({placeholders})", "ts >= :start", "ts <= :end"]
+        cond = "WHERE " + " AND ".join(where)
+        offset = (page - 1) * page_size
+
+        count_sql = text(f"""
+            SELECT COUNT(*) FROM (
+                SELECT {group_expr} AS {group_label}, device_id
+                FROM history_energy
+                {cond}
+                GROUP BY device_id, {group_label}
+            ) t
+        """)
+        query_sql = text(f"""
+            SELECT
+                device_id,
+                {group_expr} AS {group_label},
+                SUM(charge_wh_total) AS charge_wh_total,
+                SUM(discharge_wh_total) AS discharge_wh_total,
+                SUM(pv_wh_total) AS pv_wh_total,
+                SUM(grid_wh_total) AS grid_wh_total,
+                SUM(load_wh_total) AS load_wh_total
+            FROM history_energy
+            {cond}
+            GROUP BY device_id, {group_label}
+            ORDER BY {group_label} DESC
+            LIMIT :limit OFFSET :offset
+        """)
+
+        total = (await conn.execute(count_sql, params)).scalar_one()
+        rows = (await conn.execute(query_sql, {**params, "limit": page_size, "offset": offset})).mappings().all()
+
+    items = []
+    for r in rows:
+        d = dict(r)
+        d["device_sn"] = device_sn_map.get(d["device_id"], "")
+        if group_label == "hour":
+            d["hour"] = d.pop("hour")
+            d["day"] = None
+            d["month"] = None
+        elif group_label == "day":
+            d["day"] = d.pop("day")
+            d["hour"] = None
+            d["month"] = None
+        elif group_label == "month":
+            d["month"] = d.pop("month")
+            d["hour"] = None
+            d["day"] = None
+        items.append(d)
+    return {"items": items, "page": page, "page_size": page_size, "total": total}
+
+# 报警模型
+class AlarmItem(BaseModel):
+    alarm_id: int = Field(..., alias="alarm_id")
+    device_id: Optional[int]
+    alarm_type: str
+    code: int
+    level: str
+    extra: Optional[Any]
+    status: str
+    first_triggered_at: datetime
+    last_triggered_at: datetime
+    repeat_count: int
+    remark: Optional[str]
+    confirmed_at: Optional[datetime]
+    confirmed_by: Optional[str]
+    cleared_at: Optional[datetime]
+    cleared_by: Optional[str]
+    class Config:
+        allow_population_by_field_name = True
+
+class AlarmListResponse(BaseModel):
+    items: List[AlarmItem]
+    page: int
+    page_size: int
+    total: int
+
+# 我的报警（当前）
+@router.get(
+    "/alarms/user",
+    response_model=AlarmListResponse,
+    tags=["用户 | User"],
+    summary="查询本人设备报警 | Query My Device Alarms",
+)
+async def list_my_alarms(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    status: Optional[str] = Query(None),
+    level: Optional[str] = Query(None),
+    code: Optional[int] = Query(None),
+    user=Depends(get_current_user)
+):
+    if user["role"] in ("admin", "service", "support"):
+        raise HTTPException(status_code=403, detail="管理员/客服/支持请用专用接口")
+    async with engine.connect() as conn:
+        devices = (await conn.execute(
+            text("SELECT id FROM devices WHERE user_id=:uid"),
+            {"uid": user["user_id"]}
+        )).scalars().all()
+    if not devices:
+        return {"items": [], "page": page, "page_size": page_size, "total": 0}
+
+    placeholders = ",".join([f":id{i}" for i in range(len(devices))])
+    params = {f"id{i}": did for i, did in enumerate(devices)}
+    where = [f"device_id IN ({placeholders})"]
+    if status:
+        where.append("status = :status"); params["status"] = status
+    if level:
+        where.append("level = :level"); params["level"] = level
+    if code:
+        where.append("code = :code"); params["code"] = code
+    cond = "WHERE " + " AND ".join(where)
+    offset = (page - 1) * page_size
+
+    async with engine.connect() as conn:
+        count_sql = text(f"SELECT COUNT(*) FROM alarms {cond}")
+        total = (await conn.execute(count_sql, params)).scalar_one()
+        query_sql = text(f"""
+            SELECT *
+            FROM alarms
+            {cond}
+            ORDER BY first_triggered_at DESC
+            LIMIT :limit OFFSET :offset
+        """)
+        rows = (await conn.execute(query_sql, {**params, "limit": page_size, "offset": offset})).mappings().all()
+        items = []
+        for row in rows:
+            d = dict(row)
+            d["alarm_id"] = d.pop("id")
+            items.append(d)
+    return {"items": items, "page": page, "page_size": page_size, "total": total}
+
+# 我的历史报警
+@router.get(
+    "/alarms/history",
+    response_model=AlarmListResponse,
+    tags=["用户 | User"],
+    summary="查询本人设备历史报警 | Query My Device Alarm History",
+)
+async def list_my_alarm_history(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    status: Optional[str] = Query(None),
+    level: Optional[str] = Query(None),
+    code: Optional[int] = Query(None),
+    user=Depends(get_current_user)
+):
+    if user["role"] in ("admin", "service", "support"):
+        raise HTTPException(status_code=403, detail="管理员/客服/支持请用专用接口")
+    async with engine.connect() as conn:
+        devices = (await conn.execute(
+            text("SELECT id FROM devices WHERE user_id=:uid"),
+            {"uid": user["user_id"]}
+        )).scalars().all()
+    if not devices:
+        return {"items": [], "page": page, "page_size": page_size, "total": 0}
+
+    placeholders = ",".join([f":id{i}" for i in range(len(devices))])
+    params = {f"id{i}": did for i, did in enumerate(devices)}
+    where = [f"device_id IN ({placeholders})"]
+    if status:
+        where.append("status = :status"); params["status"] = status
+    if level:
+        where.append("level = :level"); params["level"] = level
+    if code:
+        where.append("code = :code"); params["code"] = code
+    cond = "WHERE " + " AND ".join(where)
+    offset = (page - 1) * page_size
+
+    async with engine.connect() as conn:
+        count_sql = text(f"SELECT COUNT(*) FROM alarm_history {cond}")
+        total = (await conn.execute(count_sql, params)).scalar_one()
+        query_sql = text(f"""
+            SELECT *
+            FROM alarm_history
+            {cond}
+            ORDER BY first_triggered_at DESC
+            LIMIT :limit OFFSET :offset
+        """)
+        rows = (await conn.execute(query_sql, {**params, "limit": page_size, "offset": offset})).mappings().all()
+        items = []
+        for row in rows:
+            d = dict(row)
+            d["alarm_id"] = d.pop("id")
+            items.append(d)
+    return {"items": items, "page": page, "page_size": page_size, "total": total}
+
+# 用户 RPC 参数白名单（仅允许 control_mode）
+USER_RPC_ALLOWED = {"control_mode"}
+
+class RPCChangeRequest(BaseModel):
+    device_sn: str
+    para_name: str
+    para_value: str
+    message: Optional[str] = None
+
+@router.post(
+    "/device/user_rpc_change",
+    tags=["用户 | User"],
+    summary="用户参数下发 | User RPC Change",
+    description="普通用户仅可对自己名下设备发起 RPC 请求（参数白名单：control_mode）。"
+)
+async def user_rpc_change(
+    req: RPCChangeRequest,
+    user=Depends(get_current_user)
+):
+    if user["role"] in ("admin", "service", "support"):
+        raise HTTPException(status_code=403, detail="管理员/客服/支持请使用管理员接口")
+    if req.para_name not in USER_RPC_ALLOWED:
+        raise HTTPException(status_code=403, detail=f"不允许修改参数: {req.para_name}")
+
+    async with engine.begin() as conn:
+        device_row = (await conn.execute(
+            text("SELECT id FROM devices WHERE device_sn=:sn AND user_id=:uid"),
+            {"sn": req.device_sn, "uid": user["user_id"]}
+        )).mappings().first()
+        if not device_row:
+            raise HTTPException(status_code=404, detail="设备不存在或不属于当前用户")
+        device_id = device_row["id"]
+
+        ts = str(int(ttime.time()))
+        rnd = ''.join(random.choices(string.ascii_uppercase, k=4))
+        request_id = f"{ts}{rnd}"
+
+        await conn.execute(
+            text("""
+                INSERT INTO device_rpc_change_log (
+                  device_id, operator, request_id, para_name, para_value, status, message
+                ) VALUES (
+                  :device_id, :operator, :request_id, :para_name, :para_value, 'pending', :message
+                )
+            """),
+            {
+                "device_id": device_id,
+                "operator": "user",
+                "request_id": request_id,
+                "para_name": req.para_name,
+                "para_value": req.para_value,
+                "message": req.message or f"user change {req.para_name} = {req.para_value}"
+            }
+        )
+
+    topic = f"devices/{req.device_sn}/rpc"
+    payload = {
+        "request_id": request_id,
+        "para_name": req.para_name,
+        "para_value": req.para_value,
+        "operator": "user",
+        "message": req.message or f"user change {req.para_name} = {req.para_value}",
+        "timestamp": datetime.utcnow().isoformat() + "Z"
+    }
+    publish.single(
+        topic,
+        json.dumps(payload),
+        hostname=os.getenv("MQTT_HOST"),
+        port=int(os.getenv("MQTT_PORT", "1883"))
+    )
+    return {"status": "ok", "request_id": request_id, "message": req.message}
