@@ -1,5 +1,3 @@
-```python
-// filepath: c:\Users\orson\Desktop\New folder\ess-test\api\deps.py
 import os
 import jwt
 from datetime import datetime, timedelta
