@@ -60,6 +60,29 @@ from routers import user as user_router, admin as admin_router
 app.include_router(user_router.router)
 app.include_router(admin_router.router)
 
+# 管理员/客服共用：根据设备SN获取实时数据
+@app.get(
+    "/api/v1/admin/realtime/by_sn/{device_sn}",
+    tags=["管理员/客服 | Admin/Service"],
+    summary="根据设备SN获取实时数据 | Get Realtime Data by Device SN"
+)
+async def get_realtime_by_sn(device_sn: str, user=Depends(get_current_user)):
+    if user["role"] not in ("admin", "service", "support"):
+        raise HTTPException(status_code=403, detail="无权限")
+    sql = text(f"""
+        SELECT {COLUMNS}
+        FROM ess_realtime_data r
+        JOIN devices d ON r.device_id = d.id
+        WHERE d.device_sn=:sn
+    """)
+    async with engine.connect() as conn:
+        row = (await conn.execute(sql, {"sn": device_sn})).mappings().first()
+        if not row:
+            raise HTTPException(status_code=404, detail="实时数据不存在")
+    d = dict(row)
+    d["online"] = online_flag(d["updated_at"], settings.FRESH_SECS)
+    return d
+
 # ---------------- 其余未迁出接口保持不变 ----------------
 from sqlalchemy import func
 
@@ -805,146 +828,6 @@ async def startup_event():
     asyncio.create_task(cleanup_rpc_logs())
     asyncio.create_task(cleanup_alarm_history())
 
-class AdminBatchDeleteAlarmHistoryBySNRequest(BaseModel):
-    device_sn: str
-
-@app.delete(
-    "/api/v1/admin/alarm_history/delete_by_sn",
-    tags=["管理员 | Admin Only"],
-    summary="管理员按设备SN批量删除历史报警",
-    description="只有管理员可以按设备SN批量删除历史报警记录，客服无权限。"
-)
-async def admin_delete_alarm_history_by_sn(
-    data: AdminBatchDeleteAlarmHistoryBySNRequest,
-    user=Depends(get_current_user)
-):
-    if user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="只有管理员可以删除历史报警记录")
-    async with engine.begin() as conn:
-        device_row = (await conn.execute(
-            text("SELECT id FROM devices WHERE device_sn=:sn"),
-            {"sn": data.device_sn}
-        )).mappings().first()
-        if not device_row:
-            raise HTTPException(status_code=404, detail="设备不存在")
-        device_id = device_row["id"]
-        result = await conn.execute(
-            text("DELETE FROM alarm_history WHERE device_id=:id"),
-            {"id": device_id}
-        )
-    return {
-        "msg": f"已删除设备 {data.device_sn} 的所有历史报警记录",
-        "deleted_count": result.rowcount,
-        "device_sn": data.device_sn
-    }
-
-
-class AdminBatchDeleteRPCLogBySNRequest(BaseModel):
-    device_sn: str
-
-@app.delete(
-    "/api/v1/admin/rpc_log/delete_by_sn",
-    tags=["管理员 | Admin Only"],
-    summary="管理员按设备SN批量删除RPC日志",
-    description="只有管理员可以按设备SN批量删除RPC日志，客服无权限。"
-)
-async def admin_delete_rpc_log_by_sn(
-    data: AdminBatchDeleteRPCLogBySNRequest,
-    user=Depends(get_current_user)
-):
-    if user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="只有管理员可以删除RPC日志")
-    async with engine.begin() as conn:
-        device_row = (await conn.execute(
-            text("SELECT id FROM devices WHERE device_sn=:sn"),
-            {"sn": data.device_sn}
-        )).mappings().first()
-        if not device_row:
-            raise HTTPException(status_code=404, detail="设备不存在")
-        device_id = device_row["id"]
-        result = await conn.execute(
-            text("DELETE FROM device_rpc_change_log WHERE device_id=:id"),
-            {"id": device_id}
-        )
-    return {
-        "msg": f"已删除设备 {data.device_sn} 的所有RPC日志",
-        "deleted_count": result.rowcount,
-        "device_sn": data.device_sn
-    }
-
-@app.delete(
-    "/api/v1/admin/alarm_history/clear_all",
-    tags=["管理员 | Admin Only"],
-    summary="管理员清除所有历史报警记录（分批）",
-    description="只有管理员可以分批清除所有历史报警记录，客服无权限。"
-)
-async def admin_clear_all_alarm_history(
-    user=Depends(get_current_user)
-):
-    if user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="只有管理员可以清除所有历史报警记录")
-    batch_size = 5000
-    total_deleted = 0
-    async with engine.begin() as conn:
-        while True:
-            result = await conn.execute(
-                text(f"DELETE FROM alarm_history WHERE id IN (SELECT id FROM alarm_history LIMIT {batch_size})")
-            )
-            deleted = result.rowcount
-            total_deleted += deleted
-            if deleted < batch_size:
-                break
-        # 写入操作日志
-        await conn.execute(
-            text("""
-                INSERT INTO admin_audit_log (operator, action, params, result)
-                VALUES (:operator, :action, :params, :result)
-            """),
-            {
-                "operator": user["username"],
-                "action": "admin_clear_all_alarm_history",
-                "params": json.dumps({}),
-                "result": json.dumps({"deleted_count": total_deleted})
-            }
-        )
-    return {"msg": "所有历史报警记录已清除", "deleted_count": total_deleted}
-
-@app.delete(
-    "/api/v1/admin/rpc_log/clear_all",
-    tags=["管理员 | Admin Only"],
-    summary="管理员清除所有RPC日志（分批）",
-    description="只有管理员可以分批清除所有RPC日志，客服无权限。"
-)
-async def admin_clear_all_rpc_log(
-    user=Depends(get_current_user)
-):
-    if user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="只有管理员可以清除所有RPC日志")
-    batch_size = 5000
-    total_deleted = 0
-    async with engine.begin() as conn:
-        while True:
-            result = await conn.execute(
-                text(f"DELETE FROM device_rpc_change_log WHERE id IN (SELECT id FROM device_rpc_change_log LIMIT {batch_size})")
-            )
-            deleted = result.rowcount
-            total_deleted += deleted
-            if deleted < batch_size:
-                break
-        # 写入操作日志
-        await conn.execute(
-            text("""
-                INSERT INTO admin_audit_log (operator, action, params, result)
-                VALUES (:operator, :action, :params, :result)
-            """),
-            {
-                "operator": user["username"],
-                "action": "admin_clear_all_rpc_log",
-                "params": json.dumps({}),
-                "result": json.dumps({"deleted_count": total_deleted})
-            }
-        )
-    return {"msg": "所有RPC日志已清除", "deleted_count": total_deleted}
 
 class AlarmConfirmBySNAndCodeRequest(BaseModel):
     device_sn: str
