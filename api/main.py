@@ -2,17 +2,9 @@ import os
 from datetime import datetime, timezone, timedelta, date
 from datetime import time as dtime
 from typing import List, Optional, Any
-import decimal
-import time
-import random
-import string
-import asyncio
-import json
-
-
+import decimal, time, random, string, asyncio, json
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv(".env"), override=True)
-
 from fastapi import FastAPI, Query, HTTPException, Depends, Body
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi import UploadFile, File, Request
@@ -20,8 +12,7 @@ from pydantic import BaseModel, EmailStr, Field
 from pydantic_settings import BaseSettings
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy import text, select, func
-import bcrypt
-import jwt
+import bcrypt, jwt
 from fastapi.responses import JSONResponse
 import aiosmtplib
 from email.message import EmailMessage
@@ -30,7 +21,7 @@ import uuid
 import paho.mqtt.publish as publish
 import hashlib
 
-
+from .deps import get_current_user
 
 class Settings(BaseSettings):
     DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://admin:123456@pgbouncer:6432/energy")
@@ -42,47 +33,15 @@ app = FastAPI(title="ESS Realtime API", version="1.0.0")
 FIRMWARE_DIR = os.getenv("FIRMWARE_DIR", "./firmware")
 os.makedirs(FIRMWARE_DIR, exist_ok=True)
 
+# 放到前面，供 routers 导入
+async_session = async_sessionmaker(engine, expire_on_commit=False)
 
+# ---------------- 公共模型与常量 ----------------
 
-# 修改模型，增加 device_sn
-class RealtimeData(BaseModel):
-    device_id: int
-    device_sn: str
-    updated_at: datetime
-    soc: int
-    soh: int
-    pv: int
-    load: int
-    grid: int
-    grid_q: int
-    batt: int
-    ac_v: int
-    ac_f: int
-    v_a: int
-    v_b: int
-    v_c: int
-    i_a: int
-    i_b: int
-    i_c: int
-    p_a: int
-    p_b: int
-    p_c: int
-    q_a: int
-    q_b: int
-    q_c: int
-    e_pv_today: int
-    e_load_today: int
-    e_charge_today: int
-    e_discharge_today: int
-    online: bool
+# RealtimeData / ListResponse 已迁移到 routers.user
+# /api/v1/realtime, /api/v1/realtime/by_sn/{sn}, /api/v1/register, /api/v1/login,
+# /api/v1/getinfo, /api/v1/logout 均已迁移到 routers（此处删除原定义）
 
-class ListResponse(BaseModel):
-    items: List[RealtimeData]
-    page: int
-    page_size: int
-    total: int
-
-# 修改 COLUMNS，join devices 表时取 device_sn
 COLUMNS = """
 r.device_id, d.device_sn, r.updated_at,
 r.soc, r.soh, r.pv, r.load, r.grid, r.grid_q, r.batt,
@@ -96,331 +55,12 @@ def online_flag(updated_at: datetime, fresh_secs: int) -> bool:
         updated_at = updated_at.replace(tzinfo=timezone.utc)
     return (datetime.now(timezone.utc) - updated_at) <= timedelta(seconds=fresh_secs)
 
-bearer_scheme = HTTPBearer()
+# ---------------- 挂载拆分后的路由 ----------------
+from .routers import user as user_router, admin as admin_router
+app.include_router(user_router.router)
+app.include_router(admin_router.router)
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
-    token = credentials.credentials
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        return payload  # payload 里有 user_id、username、role
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token已过期")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="无效的Token")
-
-# ================= 用户专用接口 / User APIs =================
-
-@app.get(
-    "/api/v1/realtime",
-    response_model=ListResponse,
-    tags=["用户 | User"],
-    summary="获取用户实时数据 | Get User Realtime Data",
-    description="""
-获取当前用户所有设备的最新实时数据，支持分页。仅普通用户可用。
-
-Get the latest realtime data for all devices of the current user, supports pagination. Only available for normal users.
-"""
-)
-async def list_realtime(
-    page: int = Query(1, ge=1, description="页码 | Page number"),
-    page_size: int = Query(20, ge=1, le=200, description="每页数量 | Page size"),
-    fresh_secs: Optional[int] = Query(None, description="判定在线的秒数，默认60秒 | Seconds to judge online, default 60s"),
-    user=Depends(get_current_user)
-):
-    # 只允许普通用户访问，管理员/客服/支持请使用专用接口
-    if user["role"] in ("admin", "service", "support"):
-        raise HTTPException(status_code=403, detail="管理员/客服/支持请使用专用接口")
-    fresh = fresh_secs or settings.FRESH_SECS
-    where = ["d.user_id = :user_id"]
-    params = {"user_id": user["user_id"]}
-    join_sql = "JOIN devices d ON r.device_id = d.id"
-    cond = "WHERE " + " AND ".join(where)
-
-    count_sql = text(f"SELECT COUNT(*) FROM ess_realtime_data r {join_sql} {cond}")
-    query_sql = text(f"""
-        SELECT {COLUMNS}
-        FROM ess_realtime_data r
-        {join_sql}
-        {cond}
-        ORDER BY r.updated_at DESC
-        LIMIT :limit OFFSET :offset
-    """)
-
-    offset = (page - 1) * page_size
-    async with engine.connect() as conn:
-        total = (await conn.execute(count_sql, params)).scalar_one()
-        rows = (await conn.execute(query_sql, {**params, "limit": page_size, "offset": offset})).mappings().all()
-
-    items = []
-    for r in rows:
-        d = dict(r)
-        d["online"] = online_flag(d["updated_at"], fresh)
-        items.append(d)
-    return {"items": items, "page": page, "page_size": page_size, "total": total}
-
-# ================= 管理员/客服专用接口 / Admin & Service APIs =================
-
-@app.get(
-    "/api/v1/realtime/by_sn/{device_sn}",
-    response_model=RealtimeData,
-    tags=["管理员/客服 | Admin/Service"],
-    summary="根据设备SN获取实时数据 | Get Realtime Data by Device SN",
-    description="""
-管理员或客服可通过设备SN查询该设备的最新实时数据。
-
-Admin or service staff can query the latest realtime data of a device by its SN.
-"""
-)
-async def get_realtime_by_sn(
-    device_sn: str,
-    user=Depends(get_current_user)
-):
-    # 只允许管理员和客服访问
-    if user["role"] not in ("admin", "service", "support"):
-        raise HTTPException(status_code=403, detail="无权限")
-    # 查找设备ID和实时数据
-    sql = text(f"""
-        SELECT {COLUMNS}
-        FROM ess_realtime_data r
-        JOIN devices d ON r.device_id = d.id
-        WHERE d.device_sn=:sn
-    """)
-    async with engine.connect() as conn:
-        row = (await conn.execute(sql, {"sn": device_sn})).mappings().first()
-        if not row:
-            raise HTTPException(status_code=404, detail="实时数据不存在")
-        d = dict(row)
-        d["online"] = online_flag(d["updated_at"], settings.FRESH_SECS)
-        return d
-
-# 其它接口如注册、登录、设备绑定等可以加 tags=["用户 | User"]，如需更多管理员/客服接口也可加 tags=["管理员/客服 | Admin/Service"]
-
-async_session = async_sessionmaker(engine, expire_on_commit=False)
-
-class UserRegister(BaseModel):
-    username: str
-    email: EmailStr
-    password: str
-    code: str  # 新增验证码字段
-
-class UserLogin(BaseModel):
-    username: str
-    password: str
-
-JWT_SECRET = os.getenv("JWT_SECRET", "your_jwt_secret_key")
-JWT_ALGORITHM = "HS256"
-
-@app.post(
-    "/api/v1/register",
-    tags=["用户 | User"],
-    summary="用户注册 | User Register",
-    description="""
-注册新用户，需提供用户名、邮箱、密码和验证码。
-
-Register a new user. Username, email, password and verification code are required.
-"""
-)
-async def register(user: UserRegister):
-    async with async_session() as session:
-        # 校验验证码
-        result = await session.execute(
-            text("""
-                SELECT id FROM email_codes
-                WHERE email=:e AND code=:c AND purpose='register'
-                  AND expires_at > now() AND used=FALSE
-                ORDER BY expires_at DESC LIMIT 1
-            """),
-            {"e": user.email, "c": user.code}
-        )
-        code_row = result.first()
-        if not code_row:
-            raise HTTPException(status_code=400, detail={"msg": "验证码错误或已过期", "msg_en": "Verification code error or expired"})
-        # 标记验证码已用
-        await session.execute(
-            text("UPDATE email_codes SET used=TRUE WHERE id=:id"),
-            {"id": code_row.id}
-        )
-        # 检查用户名或邮箱是否已存在
-        result = await session.execute(
-            text("SELECT 1 FROM users WHERE username=:u OR email=:e"),
-            {"u": user.username, "e": user.email}
-        )
-        if result.first():
-            raise HTTPException(
-                status_code=400,
-                detail={"msg": "用户名或邮箱已存在", "msg_en": "Username or email already exists"}
-            )
-        # 密码加密
-        pw_hash = bcrypt.hashpw(user.password.encode(), bcrypt.gensalt()).decode()
-        await session.execute(
-            text("INSERT INTO users (username, email, password_hash) VALUES (:u, :e, :p)"),
-            {"u": user.username, "e": user.email, "p": pw_hash}
-        )
-        await session.commit()
-    return {"msg": "注册成功", "msg_en": "Register success"}
-
-@app.post(
-    "/api/v1/login",
-    tags=["用户 | User"],
-    summary="用户登录 | User Login",
-    description="""
-用户登录，成功后返回JWT令牌。
-
-User login, returns JWT token if successful.
-"""
-)
-async def login(user: UserLogin):
-    async with async_session() as session:
-        result = await session.execute(
-            text("SELECT id, username, role, password_hash FROM users WHERE username=:u"),
-            {"u": user.username}
-        )
-        row = result.first()
-        if not row or not bcrypt.checkpw(user.password.encode(), row.password_hash.encode()):
-            raise HTTPException(
-                status_code=401,
-                detail={"msg": "用户名或密码错误", "msg_en": "Invalid username or password"}
-            )
-        # 生成JWT token
-        payload = {
-            "user_id": row.id,
-            "username": row.username,
-            "role": row.role,
-            "exp": datetime.utcnow() + timedelta(hours=1)
-        }
-        token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
-    return {"msg": "登录成功", "msg_en": "Login success", "token": token}
-
-@app.post(
-    "/api/v1/device/bind",
-    tags=["用户 | User"],
-    summary="绑定设备 | Bind Device",
-    description="""
-将设备SN绑定到指定用户名下。需登录后操作。
-
-Bind a device SN to the specified username. Requires login.
-"""
-)
-async def bind_device(
-    device_sn: str = Body(..., embed=True, description="设备SN | Device SN"),
-    username: str = Body(..., embed=True, description="用户名 | Username"),
-    user=Depends(get_current_user)
-):
-    # 权限校验：仅 admin/service 可操作任意账号；普通 user 只能操作自己的账号；support 禁止
-    if user["role"] in ("admin", "service"):
-        pass
-    elif user["role"] == "user" and username == user["username"]:
-        pass
-    else:
-        raise HTTPException(status_code=403, detail="无权限绑定此用户的设备")
-    async with engine.begin() as conn:
-        result = await conn.execute(
-            text("SELECT id FROM users WHERE username=:username"),
-            {"username": username}
-        )
-        user_row = result.first()
-        if not user_row:
-            raise HTTPException(
-                status_code=404,
-                detail={"msg": "用户不存在", "msg_en": "User not found"}
-            )
-        user_id = user_row.id
-
-        result = await conn.execute(
-            text("SELECT id, user_id FROM devices WHERE device_sn=:sn"),
-            {"sn": device_sn}
-        )
-        device = result.first()
-        if not device:
-            raise HTTPException(
-                status_code=404,
-                detail={"msg": "设备不存在", "msg_en": "Device not found"}
-            )
-        # 新增判断：如果设备已绑定其他用户，禁止绑定
-        if device.user_id and device.user_id != user_id:
-            raise HTTPException(
-                status_code=403,
-                detail={"msg": "设备已绑定其他用户，请先解绑", "msg_en": "Device is already bound to another user, please unbind first"}
-            )
-        if device.user_id == user_id:
-            return {
-                "msg": "设备已绑定到该用户",
-                "msg_en": "Device already bound to this user",
-                "device_sn": device_sn,
-                "username": username
-            }
-        await conn.execute(
-            text("UPDATE devices SET user_id=:user_id WHERE device_sn=:sn"),
-            {"user_id": user_id, "sn": device_sn}
-        )
-    return {
-        "msg": "绑定成功",
-        "msg_en": "Bind success",
-        "device_sn": device_sn,
-        "username": username
-    }
-
-@app.post(
-    "/api/v1/device/unbind",
-    tags=["用户 | User"],
-    summary="解绑设备 | Unbind Device",
-    description="""
-将设备SN从指定用户名下解绑。需登录后操作。
-
-Unbind a device SN from the specified username. Requires login.
-"""
-)
-async def unbind_device(
-    device_sn: str = Body(..., embed=True, description="设备SN | Device SN"),
-    username: str = Body(..., embed=True, description="用户名 | Username"),
-    user=Depends(get_current_user)
-):
-    # 权限校验：仅 admin/service 可操作任意账号；普通 user 只能操作自己的账号；support 禁止
-    if user["role"] in ("admin", "service"):
-        pass
-    elif user["role"] == "user" and username == user["username"]:
-        pass
-    else:
-        raise HTTPException(status_code=403, detail="无权限解绑此用户的设备")
-    async with engine.begin() as conn:
-        result = await conn.execute(
-            text("SELECT id FROM users WHERE username=:username"),
-            {"username": username}
-        )
-        user_row = result.first()
-        if not user_row:
-            raise HTTPException(
-                status_code=404,
-                detail={"msg": "用户不存在", "msg_en": "User not found"}
-            )
-        user_id = user_row.id
-
-        result = await conn.execute(
-            text("SELECT id, user_id FROM devices WHERE device_sn=:sn"),
-            {"sn": device_sn}
-        )
-        device = result.first()
-        if not device:
-            raise HTTPException(
-                status_code=404,
-                detail={"msg": "设备不存在", "msg_en": "Device not found"}
-            )
-        if device.user_id != user_id:
-            raise HTTPException(
-                status_code=403,
-                detail={"msg": "设备未绑定到该用户，无法解绑", "msg_en": "Device is not bound to this user, cannot unbind"}
-            )
-        await conn.execute(
-            text("UPDATE devices SET user_id=NULL WHERE device_sn=:sn"),
-            {"sn": device_sn}
-        )
-    return {
-        "msg": "解绑成功",
-        "msg_en": "Unbind success",
-        "device_sn": device_sn,
-        "username": username
-    }
-
+# ---------------- 其余未迁出接口保持不变 ----------------
 from sqlalchemy import func
 
 class HistoryDataAgg(BaseModel):
@@ -1989,27 +1629,4 @@ async def list_firmware(
 ):
     if user["role"] not in ("admin", "service", "support"):
         raise HTTPException(status_code=403, detail="无权限")
-    offset = (page - 1) * page_size
-
-    async with engine.connect() as conn:
-        total = (await conn.execute(
-            text("SELECT COUNT(*) FROM firmware_files WHERE device_type=:t"),
-            {"t": device_type},
-        )).scalar_one()
-        rows = (await conn.execute(
-            text("""
-                SELECT device_type, version, filename, file_size, md5, notes, uploaded_at
-                FROM firmware_files
-                WHERE device_type=:t
-                ORDER BY
-                  COALESCE(NULLIF(split_part(version,'.',1),''),'0')::int DESC,
-                  COALESCE(NULLIF(split_part(version,'.',2),''),'0')::int DESC,
-                  COALESCE(NULLIF(split_part(version,'.',3),''),'0')::int DESC,
-                  uploaded_at DESC
-                LIMIT :limit OFFSET :offset
-            """),
-            {"t": device_type, "limit": page_size, "offset": offset},
-        )).mappings().all()
-
-    items = [dict(r) | {"download_url": f"/ota/{r['filename']}"} for r in rows]
-    return {"items": items, "page": page, "page_size": page_size, "total": total}
+    offset = (page - 1)
