@@ -1,35 +1,33 @@
-import os
-from datetime import datetime, timezone, timedelta, date
-from datetime import time as dtime
-from typing import List, Optional, Any
-import decimal, time, random, string, asyncio, json
-from dotenv import load_dotenv, find_dotenv
-load_dotenv(find_dotenv(".env"), override=True)
-from fastapi import FastAPI, Query, HTTPException, Depends, Body
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi import UploadFile, File, Request
+from datetime import datetime, timedelta
+from fastapi import FastAPI, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy import text
 from pydantic import BaseModel, EmailStr, Field
 from pydantic_settings import BaseSettings
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy import text, select, func
-import bcrypt, jwt
-from fastapi.responses import JSONResponse
+import asyncio
+import json
+import os
+import uuid
+from random import randint
+import decimal
+import time
+import bcrypt
+import jwt
 import aiosmtplib
 from email.message import EmailMessage
-from random import randint
-import uuid
-import paho.mqtt.publish as publish
-import hashlib
 
 from deps import get_current_user
+from config import DATABASE_URL, DEVICE_FRESH_SECS, ALARM_HISTORY_RETENTION_DAYS, RPC_LOG_RETENTION_DAYS
 
-class Settings(BaseSettings):
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://admin:123456@pgbouncer:6432/energy")
-    FRESH_SECS: int = int(os.getenv("FRESH_SECS", "60"))
+app = FastAPI(title="ESS Realtime API", version="1.0.0")
+
+class Settings:
+    DB_URL = DATABASE_URL
+    FRESH_SECS = DEVICE_FRESH_SECS
 
 settings = Settings()
-engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=True)
-app = FastAPI(title="ESS Realtime API", version="1.0.0")
+
+engine = create_async_engine(settings.DB_URL, pool_pre_ping=True)
 FIRMWARE_DIR = os.getenv("FIRMWARE_DIR", "./firmware")
 os.makedirs(FIRMWARE_DIR, exist_ok=True)
 
@@ -56,7 +54,8 @@ def online_flag(updated_at: datetime, fresh_secs: int) -> bool:
     return (datetime.now(timezone.utc) - updated_at) <= timedelta(seconds=fresh_secs)
 
 # ---------------- 挂载拆分后的路由 ----------------
-from routers import user as user_router, admin as admin_router, ota as ota_router, rpc as rpc_router, alarm as alarm_router
+from routers import user as user_router, admin as admin_router, ota as ota_router, rpc as rpc_router, alarm as alarm_router, auth as auth_router
+app.include_router(auth_router.router)
 app.include_router(user_router.router)
 app.include_router(admin_router.router)
 app.include_router(ota_router.router)
@@ -373,146 +372,29 @@ def convert_decimal(obj):
     else:
         return obj
 
-class EmailCodeRequest(BaseModel):
-    email: EmailStr
-
-@app.post(
-    "/api/v1/send_email_code_register",
-    tags=["用户 | User"],
-    summary="【测试用】发送注册验证码（直接返回code）| [Test] Send Register Code (Return Code)",
-    description="""
-开发测试用：向指定邮箱生成注册验证码，验证码5分钟内有效，直接返回验证码（生产环境请勿返回code）。
-
-For development/testing: generate a registration code for the given email, valid for 5 minutes, and return the code directly (do NOT do this in production).
-"""
-)
-async def send_email_code_register(data: EmailCodeRequest):
-    # 检查邮箱是否已注册
-    async with engine.connect() as conn:
-        result = await conn.execute(
-            text("SELECT 1 FROM users WHERE email=:email"),
-            {"email": data.email}
-        )
-        if result.first():
-            raise HTTPException(
-                status_code=400,
-                detail={"msg": "该邮箱已注册", "msg_en": "This email is already registered"}
-            )
-    code = f"{randint(100000, 999999)}"
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
-    # 写入数据库
-    async with engine.begin() as conn:
-        await conn.execute(
-            text("""
-                INSERT INTO email_codes (email, code, purpose, expires_at)
-                VALUES (:email, :code, :purpose, :expires_at)
-            """),
-            {
-                "email": data.email,
-                "code": code,
-                "purpose": "register",
-                "expires_at": expires_at
-            }
-        )
-    # 直接返回验证码（仅测试用）
-    return {
-        "msg": "验证码已生成（测试环境直接返回）",
-        "msg_en": "Verification code generated (returned for testing)",
-        "code": code
-    }
-
 async def cleanup_alarm_history():
-    """每周一凌晨2点分批清理1年前的历史报警记录，每批最多500条，并写入操作日志"""
     while True:
-        now = datetime.now()
-        # 计算下一个周一凌晨2点
-        days_ahead = (7 - now.weekday()) % 7  # 0=周一
-        if days_ahead == 0 and now.hour >= 2:
-            days_ahead = 7
-        next_run = (now + timedelta(days=days_ahead)).replace(hour=2, minute=0, second=0, microsecond=0)
-        sleep_seconds = (next_run - now).total_seconds()
-        await asyncio.sleep(sleep_seconds)
+        await asyncio.sleep(86400)  # 每天运行一次
         try:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=ALARM_HISTORY_RETENTION_DAYS)
             async with engine.begin() as conn:
-                total_deleted = 0
-                while True:
-                    result = await conn.execute(
-                        text("""
-                            DELETE FROM alarm_history
-                            WHERE id IN (
-                                SELECT id FROM alarm_history
-                                WHERE first_triggered_at < now() - INTERVAL '1 year'
-                                ORDER BY id
-                                LIMIT 500
-                            )
-                        """)
-                    )
-                    deleted = result.rowcount
-                    total_deleted += deleted
-                    if deleted < 500:
-                        break
-                if total_deleted > 0:
-                    await conn.execute(
-                        text("""
-                            INSERT INTO admin_audit_log (operator, action, params, result)
-                            VALUES (:operator, :action, :params, :result)
-                        """),
-                        {
-                            "operator": "system_task",
-                            "action": "cleanup_alarm_history",
-                            "params": json.dumps({}),
-                            "result": json.dumps({"deleted_count": total_deleted})
-                        }
-                    )
-                    print(f"清理了 {total_deleted} 条1年前的历史报警记录")
+                await conn.execute(
+                    text("DELETE FROM alarm_history WHERE archived_at < :cutoff"),
+                    {"cutoff": cutoff}
+                )
         except Exception as e:
             print(f"清理历史报警失败: {e}")
 
-
-
 async def cleanup_rpc_logs():
-    """每周一凌晨2点分批清理1年前的RPC日志，每批最多500条，并写入操作日志"""
     while True:
-        now = datetime.now()
-        days_ahead = (7 - now.weekday()) % 7
-        if days_ahead == 0 and now.hour >= 2:
-            days_ahead = 7
-        next_run = (now + timedelta(days=days_ahead)).replace(hour=2, minute=0, second=0, microsecond=0)
-        sleep_seconds = (next_run - now).total_seconds()
-        await asyncio.sleep(sleep_seconds)
+        await asyncio.sleep(86400)  # 每天运行一次
         try:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=RPC_LOG_RETENTION_DAYS)
             async with engine.begin() as conn:
-                total_deleted = 0
-                while True:
-                    result = await conn.execute(
-                        text("""
-                            DELETE FROM device_rpc_change_log
-                            WHERE id IN (
-                                SELECT id FROM device_rpc_change_log
-                                WHERE created_at < now() - INTERVAL '1 year'
-                                ORDER BY id
-                                LIMIT 500
-                            )
-                        """)
-                    )
-                    deleted = result.rowcount
-                    total_deleted += deleted
-                    if deleted < 500:
-                        break
-                if total_deleted > 0:
-                    await conn.execute(
-                        text("""
-                            INSERT INTO admin_audit_log (operator, action, params, result)
-                            VALUES (:operator, :action, :params, :result)
-                        """),
-                        {
-                            "operator": "system_task",
-                            "action": "cleanup_rpc_logs",
-                            "params": json.dumps({}),
-                            "result": json.dumps({"deleted_count": total_deleted})
-                        }
-                    )
-                    print(f"清理了 {total_deleted} 条1年前的RPC历史记录")
+                await conn.execute(
+                    text("DELETE FROM device_rpc_change_log WHERE created_at < :cutoff"),
+                    {"cutoff": cutoff}
+                )
         except Exception as e:
             print(f"清理RPC日志失败: {e}")
 
