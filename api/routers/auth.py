@@ -5,7 +5,7 @@ from random import randint
 from typing import Dict
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import text
 from main import engine
 from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, EMAIL_CODE_EXPIRE_MINUTES
@@ -29,7 +29,7 @@ class RegisterRequest(BaseModel):
     username: str
 
 class LoginRequest(BaseModel):
-    email_or_username: str  # 兼容邮箱或用户名
+    username: str = Field(..., description="邮箱或用户名 | Email or username")
     password: str    # ← 必须是字符串
 
 class LoginResponse(BaseModel):
@@ -198,7 +198,7 @@ async def login(data: LoginRequest):
                 FROM users 
                 WHERE email=:input OR username=:input
             """),
-            {"input": data.email_or_username}
+            {"input": data.username}
         )).mappings().first()
         
         if not user_row:
