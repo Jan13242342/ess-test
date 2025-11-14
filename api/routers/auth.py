@@ -29,6 +29,7 @@ class LoginRequest(BaseModel):
     password: str    # ← 必须是字符串
 
 class LoginResponse(BaseModel):
+    token: str  # 兼容旧版前端
     access_token: str
     token_type: str = "bearer"
     user_id: int
@@ -216,6 +217,7 @@ async def login(data: LoginRequest):
     token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
     
     return {
+        "token": token,  # 兼容旧版前端
         "access_token": token,
         "token_type": "bearer",
         "user_id": user_row["id"],
