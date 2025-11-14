@@ -18,7 +18,15 @@ class AdminBatchDeleteRPCLogBySNRequest(BaseModel):
     "/alarm_history/delete_by_sn",
     tags=["管理员专用 | Admin Only"],
     summary="按设备SN删除历史报警 | Delete Alarm History by Device SN",
-    description="仅管理员可用，删除指定设备的所有历史报警。"
+    description="""
+**权限要求 | Required Role**: admin
+
+仅管理员可用，删除指定设备的所有历史报警记录。
+
+Admin only. Delete all alarm history records for the specified device.
+
+⚠️ **警告 | Warning**: 此操作不可逆！| This operation is irreversible!
+"""
 )
 async def admin_delete_alarm_history_by_sn(
     data: AdminBatchDeleteAlarmHistoryBySNRequest,
@@ -44,7 +52,15 @@ async def admin_delete_alarm_history_by_sn(
     "/rpc_log/delete_by_sn",
     tags=["管理员专用 | Admin Only"],
     summary="按设备SN删除RPC日志 | Delete RPC Log by Device SN",
-    description="仅管理员可用，删除指定设备的所有RPC变更日志。"
+    description="""
+**权限要求 | Required Role**: admin
+
+仅管理员可用，删除指定设备的所有RPC变更日志。
+
+Admin only. Delete all RPC change logs for the specified device.
+
+⚠️ **警告 | Warning**: 此操作不可逆！| This operation is irreversible!
+"""
 )
 async def admin_delete_rpc_log_by_sn(
     data: AdminBatchDeleteRPCLogBySNRequest,
@@ -70,7 +86,17 @@ async def admin_delete_rpc_log_by_sn(
     "/alarm_history/clear_all",
     tags=["管理员专用 | Admin Only"],
     summary="清空所有历史报警 | Clear All Alarm History",
-    description="仅管理员可用，删除所有历史报警记录。"
+    description="""
+**权限要求 | Required Role**: admin
+
+仅管理员可用，删除所有历史报警记录（全系统范围）。
+
+Admin only. Delete all alarm history records (system-wide).
+
+⚠️ **危险操作 | Dangerous Operation**: 此操作将清空所有设备的历史报警，不可逆！
+
+This operation will clear all devices' alarm history and is irreversible!
+"""
 )
 async def admin_clear_all_alarm_history(user=Depends(get_current_user)):
     if user["role"] != "admin":
@@ -84,7 +110,17 @@ async def admin_clear_all_alarm_history(user=Depends(get_current_user)):
     "/rpc_log/clear_all",
     tags=["管理员专用 | Admin Only"],
     summary="清空所有RPC日志 | Clear All RPC Logs",
-    description="仅管理员可用，删除所有RPC变更日志。"
+    description="""
+**权限要求 | Required Role**: admin
+
+仅管理员可用，删除所有RPC变更日志（全系统范围）。
+
+Admin only. Delete all RPC change logs (system-wide).
+
+⚠️ **危险操作 | Dangerous Operation**: 此操作将清空所有设备的RPC日志，不可逆！
+
+This operation will clear all devices' RPC logs and is irreversible!
+"""
 )
 async def admin_clear_all_rpc_logs(user=Depends(get_current_user)):
     if user["role"] != "admin":

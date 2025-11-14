@@ -48,7 +48,13 @@ class AlarmConfirmBySNAndCodeRequest(BaseModel):
     "/admin",
     response_model=AlarmListResponse,
     summary="报警管理查询 | Query All Alarms (Admin/Service)",
-    description="管理员/客服可按设备序列号、状态、级别、code等筛选报警。"
+    description="""
+**权限要求 | Required Role**: admin, service, support
+
+管理员/客服可按设备序列号、状态、级别、code等筛选报警。
+
+Admin/Service/Support can filter alarms by device SN, status, level, code, etc.
+"""
 )
 async def list_all_alarms(
     page: int = Query(1, ge=1),
@@ -106,7 +112,13 @@ async def list_all_alarms(
 @router.post(
     "/admin/batch_confirm",
     summary="按code批量确认报警 | Batch Confirm Alarms By Code",
-    description="管理员/客服按报警code批量确认所有未确认的报警（只操作当前报警表，历史报警不能确认）。"
+    description="""
+**权限要求 | Required Role**: admin, service
+
+管理员/客服按报警code批量确认所有未确认的报警（只操作当前报警表，历史报警不能确认）。
+
+Admin/Service can batch confirm all unconfirmed alarms by code (only operates on current alarms table, history alarms cannot be confirmed).
+"""
 )
 async def batch_confirm_alarm_by_code(
     data: AlarmBatchConfirmByCodeRequest,
@@ -130,7 +142,13 @@ async def batch_confirm_alarm_by_code(
 @router.get(
     "/unhandled_count",
     summary="统计未处理报警数量（含各等级） | Count Unhandled Alarms (by Level)",
-    description="仅管理员和客服可用。统计所有未处理（active/confirmed）报警的总数量及各等级数量。"
+    description="""
+**权限要求 | Required Role**: admin, service, support
+
+仅管理员和客服可用。统计所有未处理（active/confirmed）报警的总数量及各等级数量。
+
+Admin/Service/Support only. Count total and per-level unhandled (active/confirmed) alarms.
+"""
 )
 async def count_unhandled_alarms(user=Depends(get_current_user)):
     if user["role"] not in ("admin", "service", "support"):
@@ -158,7 +176,15 @@ async def count_unhandled_alarms(user=Depends(get_current_user)):
 @router.post(
     "/admin/confirm",
     summary="按设备SN和code确认报警 | Confirm Alarms By Device SN and Code",
-    description="管理员/客服按设备SN和code确认所有未确认的报警（只操作当前报警表，历史报警不能确认）。"
+    description="""
+**权限要求 | Required Role**: admin, service
+
+管理员/客服按设备SN和code确认所有未确认的报警（只操作当前报警表，历史报警不能确认）。
+确认critical级别cleared状态的报警时，会自动归档到alarm_history表。
+
+Admin/Service can confirm all unconfirmed alarms by device SN and code (only operates on current alarms table).
+Critical level cleared alarms will be automatically archived to alarm_history table.
+"""
 )
 async def confirm_alarm_by_sn_and_code(
     data: AlarmConfirmBySNAndCodeRequest,

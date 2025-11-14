@@ -46,9 +46,20 @@ USER_RPC_ALLOWED = {"control_mode"}
 # 用户端 RPC 下发
 @router.post(
     "/user_rpc_change",
-    tags=["用户 | User"],
     summary="用户参数下发 | User RPC Change",
-    description="普通用户仅可对自己名下设备发起 RPC 请求（参数白名单：control_mode）。"
+    description="""
+**权限要求 | Required Role**: user (普通用户)
+
+普通用户仅可对自己名下设备发起 RPC 请求。
+
+**参数白名单 | Allowed Parameters**: `control_mode`
+
+User can only send RPC requests to their own devices with whitelisted parameters.
+
+📝 **注意 | Note**: 
+- 只能修改白名单内的参数 | Only whitelisted parameters can be modified
+- 设备必须归属当前用户 | Device must belong to current user
+"""
 )
 async def user_rpc_change(
     req: RPCChangeRequest,
@@ -110,8 +121,19 @@ async def user_rpc_change(
 # 管理员/客服 RPC 下发
 @router.post(
     "/rpc_change",
-    tags=["管理员/客服 | Admin/Service"],
-    summary="参数下发 | Send Device RPC Change",
+    summary="管理员参数下发 | Admin RPC Change",
+    description="""
+**权限要求 | Required Role**: admin, service
+
+管理员/客服可对任意设备发起 RPC 参数下发请求（无参数白名单限制）。
+
+Admin/Service can send RPC requests to any device without parameter restrictions.
+
+📝 **注意 | Note**: 
+- 无参数白名单限制 | No parameter whitelist restriction
+- 可操作任意设备 | Can operate on any device
+- 操作记录会保存操作人信息 | Operator info will be logged
+"""
 )
 async def rpc_change(
     req: RPCChangeRequest,
@@ -171,8 +193,20 @@ async def rpc_change(
 @router.get(
     "/rpc_history",
     response_model=RPCLogListResponse,
-    tags=["管理员/客服 | Admin/Service"],
-    summary="查询RPC变更历史",
+    summary="查询RPC变更历史 | Query RPC Change History",
+    description="""
+**权限要求 | Required Role**: admin, service, support
+
+查询RPC参数变更历史记录，支持按设备SN、状态、操作人筛选。
+
+Query RPC change history with filters for device SN, status, and operator.
+
+**可筛选字段 | Filter Fields**:
+- `device_sn`: 设备序列号 | Device serial number
+- `status`: pending/success/failed/error/timeout
+- `operator`: 操作人用户名 | Operator username
+- `page`, `page_size`: 分页参数 | Pagination
+"""
 )
 async def get_rpc_history(
     device_sn: Optional[str] = Query(None, description="设备序列号"),
@@ -220,8 +254,19 @@ async def get_rpc_history(
 # 设备参数查询
 @router.get(
     "/para",
-    tags=["管理员/客服 | Admin/Service"],
-    summary="查询设备参数",
+    summary="查询设备参数 | Query Device Parameters",
+    description="""
+**权限要求 | Required Role**: admin, service, support
+
+查询指定设备的当前参数配置。
+
+Query current parameter configuration of specified device.
+
+**返回内容 | Returns**:
+- `device_id`: 设备ID
+- `para`: 参数JSON对象 | Parameter JSON object
+- `updated_at`: 最后更新时间 | Last update time
+"""
 )
 async def get_device_para(
     device_sn: str = Query(..., description="设备序列号"),
