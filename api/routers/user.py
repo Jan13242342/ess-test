@@ -2,28 +2,14 @@ from datetime import datetime, timezone, timedelta, date
 from datetime import time as dtime
 from typing import Optional, List, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, EmailStr, Field
-import os, bcrypt, jwt, json, time as ttime, random, string
-import paho.mqtt.publish as publish
+from pydantic import BaseModel, Field
+import bcrypt  # 只保留修改密码需要的 bcrypt
 from sqlalchemy import text
 from deps import get_current_user
 from main import engine, async_session, online_flag, COLUMNS
 from config import DEVICE_FRESH_SECS
 
-JWT_SECRET = os.getenv("JWT_SECRET", "your_jwt_secret_key")
-JWT_ALGORITHM = "HS256"
-
 router = APIRouter(prefix="/api/v1", tags=["用户 | User"])
-
-class UserRegister(BaseModel):
-    username: str
-    email: EmailStr
-    password: str
-    code: str
-
-class UserLogin(BaseModel):
-    username: str
-    password: str
 
 class RealtimeData(BaseModel):
     device_id: int
@@ -68,72 +54,9 @@ class BindDeviceRequest(BaseModel):
 class UnbindDeviceRequest(BaseModel):
     device_sn: str = Field(..., description="设备序列号 | Device SN")
 
-# 新增：修改密码请求模型
 class ChangePasswordRequest(BaseModel):
     old_password: str = Field(..., min_length=6, description="旧密码 | Old password")
     new_password: str = Field(..., min_length=6, description="新密码 | New password")
-
-@router.post("/register", summary="用户注册")
-async def register(user: UserRegister):
-    async with async_session() as session:
-        code_row = (await session.execute(
-            text("""
-                SELECT id FROM email_codes
-                WHERE email=:e AND code=:c AND purpose='register'
-                  AND expires_at > now() AND used=FALSE
-                ORDER BY expires_at DESC LIMIT 1
-            """),
-            {"e": user.email, "c": user.code}
-        )).first()
-        if not code_row:
-            raise HTTPException(status_code=400, detail="验证码错误或已过期")
-        await session.execute(text("UPDATE email_codes SET used=TRUE WHERE id=:id"), {"id": code_row.id})
-        exists = (await session.execute(
-            text("SELECT 1 FROM users WHERE username=:u OR email=:e"),
-            {"u": user.username, "e": user.email}
-        )).first()
-        if exists:
-            raise HTTPException(status_code=400, detail="用户名或邮箱已存在")
-        pw_hash = bcrypt.hashpw(user.password.encode(), bcrypt.gensalt()).decode()
-        await session.execute(
-            text("INSERT INTO users (username, email, password_hash) VALUES (:u, :e, :p)"),
-            {"u": user.username, "e": user.email, "p": pw_hash}
-        )
-        await session.commit()
-    return {"msg": "注册成功"}
-
-@router.post("/login", summary="用户登录")
-async def login(user: UserLogin):
-    async with async_session() as session:
-        row = (await session.execute(
-            text("SELECT id, username, role, password_hash FROM users WHERE username=:u"),
-            {"u": user.username}
-        )).first()
-        if not row or not bcrypt.checkpw(user.password.encode(), row.password_hash.encode()):
-            raise HTTPException(status_code=401, detail="用户名或密码错误")
-        payload = {
-            "user_id": row.id,
-            "username": row.username,
-            "role": row.role,
-            "exp": datetime.utcnow() + timedelta(hours=1)
-        }
-        token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
-    return {"token": token}
-
-@router.get("/getinfo", summary="获取当前用户信息")
-async def get_info(user=Depends(get_current_user)):
-    async with engine.connect() as conn:
-        row = (await conn.execute(
-            text("SELECT username, email, role FROM users WHERE id=:uid"),
-            {"uid": user["user_id"]}
-        )).first()
-        if not row:
-            raise HTTPException(status_code=404, detail="用户不存在")
-    return {"username": row.username, "email": row.email, "role": row.role}
-
-@router.post("/logout", summary="用户登出")
-async def logout():
-    return {"msg": "登出成功"}
 
 @router.get("/realtime", response_model=ListResponse, summary="获取用户实时数据")
 async def list_realtime(
@@ -144,7 +67,7 @@ async def list_realtime(
 ):
     if user["role"] != "user":
         raise HTTPException(status_code=403, detail="权限错误")
-    fresh = fresh_secs or settings.FRESH_SECS
+    fresh = fresh_secs or DEVICE_FRESH_SECS
     join_sql = "JOIN devices d ON r.device_id = d.id"
     cond = "WHERE d.user_id = :user_id"
     count_sql = text(f"SELECT COUNT(*) FROM ess_realtime_data r {join_sql} {cond}")
