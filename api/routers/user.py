@@ -7,7 +7,8 @@ import os, bcrypt, jwt, json, time as ttime, random, string
 import paho.mqtt.publish as publish
 from sqlalchemy import text
 from deps import get_current_user
-from main import engine, async_session, settings, online_flag, COLUMNS
+from main import engine, async_session, online_flag, COLUMNS
+from config import DEVICE_FRESH_SECS
 
 JWT_SECRET = os.getenv("JWT_SECRET", "your_jwt_secret_key")
 JWT_ALGORITHM = "HS256"
@@ -163,7 +164,7 @@ async def list_realtime(
     items = []
     for r in rows:
         d = dict(r)
-        d["online"] = online_flag(d["updated_at"], fresh)
+        d["online"] = online_flag(d["updated_at"], DEVICE_FRESH_SECS)
         items.append(d)
     return {"items": items, "page": page, "page_size": page_size, "total": total}
 

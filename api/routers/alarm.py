@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from deps import get_current_user
 from main import engine
+from config import DEVICE_FRESH_SECS
 
 router = APIRouter(prefix="/api/v1/alarms", tags=["报警管理 | Alarm Management"])
 

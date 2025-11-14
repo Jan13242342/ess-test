@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from pydantic import BaseModel, Field
 from deps import get_current_user
-from main import engine, settings, online_flag, COLUMNS
+from main import engine, async_session
 
 router = APIRouter(prefix="/api/v1/admin", tags=["管理员专用 | Admin Only"])
 
