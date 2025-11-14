@@ -19,7 +19,9 @@ services:
     volumes:
       - pg_data:/var/lib/postgresql/data
       - ./postgresql.conf:/etc/postgresql/postgresql.conf:ro
-      - ./init/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+      # - ./init/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+      - ./init/schema.sql:/docker-entrypoint-initdb.d/10-schema.sql:ro
+      - ./init/ota.sql:/docker-entrypoint-initdb.d/20-ota.sql:ro
     ports:
       - "5432:5432"
   
