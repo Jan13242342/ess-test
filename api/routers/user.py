@@ -534,3 +534,47 @@ async def list_my_alarm_history(
             d["alarm_id"] = d.pop("id")
             items.append(d)
     return {"items": items, "page": page, "page_size": page_size, "total": total}
+
+async def get_realtime(user=Depends(get_current_user)):
+    async with engine.connect() as conn:
+        rows = (await conn.execute(
+            text("""
+                SELECT r.device_id, r.device_sn, r.updated_at, r.soc, r.soh, r.pv, r.load, r.grid, r.grid_q,
+                       r.batt, r.ac_v, r.ac_f, r.v_a, r.v_b, r.v_c, r.i_a, r.i_b, r.i_c,
+                       r.p_a, r.p_b, r.p_c, r.q_a, r.q_b, r.q_c,
+                       r.e_pv_today, r.e_load_today, r.e_charge_today, r.e_discharge_today
+                FROM ess_realtime_data r
+                JOIN devices d ON r.device_id = d.id
+                WHERE d.user_id = :user_id
+                ORDER BY r.updated_at DESC
+                LIMIT 1
+            """),
+            {"user_id": user["user_id"]}
+        )).mappings().all()
+        if not rows:
+            return None
+        d = dict(rows[0])
+        d["online"] = online_flag(d["updated_at"], DEVICE_FRESH_SECS)
+        return d
+
+async def get_realtime_by_device_sn(device_sn: str, user=Depends(get_current_user)):
+    async with engine.connect() as conn:
+        rows = (await conn.execute(
+            text("""
+                SELECT r.device_id, r.device_sn, r.updated_at, r.soc, r.soh, r.pv, r.load, r.grid, r.grid_q,
+                       r.batt, r.ac_v, r.ac_f, r.v_a, r.v_b, r.v_c, r.i_a, r.i_b, r.i_c,
+                       r.p_a, r.p_b, r.p_c, r.q_a, r.q_b, r.q_c,
+                       r.e_pv_today, r.e_load_today, r.e_charge_today, r.e_discharge_today
+                FROM ess_realtime_data r
+                JOIN devices d ON r.device_id = d.id
+                WHERE d.user_id = :user_id AND d.device_sn = :device_sn
+                ORDER BY r.updated_at DESC
+                LIMIT 1
+            """),
+            {"user_id": user["user_id"], "device_sn": device_sn}
+        )).mappings().all()
+        if not rows:
+            return None
+        d = dict(rows[0])
+        d["online"] = online_flag(d["updated_at"], DEVICE_FRESH_SECS)
+        return d

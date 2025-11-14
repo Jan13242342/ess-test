@@ -1,9 +1,11 @@
+import os
 import hashlib
 from typing import Optional
 from fastapi import APIRouter, Query, HTTPException, Depends, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy import text
 from deps import get_current_user
+from main import engine
 from config import FIRMWARE_DIR
 
 router = APIRouter(prefix="/api/v1/firmware", tags=["固件管理 | Firmware/OTA"])

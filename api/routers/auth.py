@@ -29,12 +29,15 @@ class RegisterRequest(BaseModel):
     username: str
 
 class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str
+    email_or_username: str  # 兼容邮箱或用户名
+    password: str    # ← 必须是字符串
 
 class LoginResponse(BaseModel):
-    token: str
-    user: Dict
+    access_token: str
+    token_type: str = "bearer"
+    user_id: int
+    username: str
+    role: str
 
 # ==================== 发送注册验证码 ====================
 
@@ -187,14 +190,22 @@ Login with email and password, returns JWT Token.
 """
 )
 async def login(data: LoginRequest):
+    # 查询时同时匹配邮箱和用户名
     async with engine.connect() as conn:
         user_row = (await conn.execute(
-            text("SELECT id, username, email, password_hash, role FROM users WHERE email=:email"),
-            {"email": data.email}
+            text("""
+                SELECT id, username, email, password_hash, role 
+                FROM users 
+                WHERE email=:input OR username=:input
+            """),
+            {"input": data.email_or_username}
         )).mappings().first()
         
         if not user_row:
-            raise HTTPException(status_code=401, detail="邮箱或密码错误")
+            raise HTTPException(
+                status_code=401,
+                detail={"msg": "邮箱或密码错误", "msg_en": "Invalid email or password"}
+            )
         
         if not bcrypt.checkpw(data.password.encode("utf-8"), user_row["password_hash"].encode("utf-8")):
             raise HTTPException(status_code=401, detail="邮箱或密码错误")
@@ -209,13 +220,11 @@ async def login(data: LoginRequest):
     token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
     
     return {
-        "token": token,
-        "user": {
-            "user_id": user_row["id"],
-            "username": user_row["username"],
-            "email": user_row["email"],
-            "role": user_row["role"]
-        }
+        "access_token": token,
+        "token_type": "bearer",
+        "user_id": user_row["id"],
+        "username": user_row["username"],
+        "role": user_row["role"]
     }
 
 # ==================== 获取当前用户信息 ====================
