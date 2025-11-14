@@ -4,43 +4,22 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy import text, func
 from pydantic import BaseModel, Field
-from pydantic_settings import BaseSettings
 from typing import Optional, List
 import asyncio
 import json
-import os
-import uuid
-from random import randint
 import decimal
-import time
-import bcrypt
-import jwt
-import aiosmtplib
-from email.message import EmailMessage
 
 from deps import get_current_user
 from config import DATABASE_URL, DEVICE_FRESH_SECS, ALARM_HISTORY_RETENTION_DAYS, RPC_LOG_RETENTION_DAYS
 
 app = FastAPI(title="ESS Realtime API", version="1.0.0")
 
-class Settings:
-    DB_URL = DATABASE_URL
-    FRESH_SECS = DEVICE_FRESH_SECS
-
-settings = Settings()
-
-engine = create_async_engine(settings.DB_URL, pool_pre_ping=True)
-FIRMWARE_DIR = os.getenv("FIRMWARE_DIR", "./firmware")
-os.makedirs(FIRMWARE_DIR, exist_ok=True)
+engine = create_async_engine(DATABASE_URL, pool_pre_ping=True)
 
 # 放到前面，供 routers 导入
 async_session = async_sessionmaker(engine, expire_on_commit=False)
 
 # ---------------- 公共模型与常量 ----------------
-
-# RealtimeData / ListResponse 已迁移到 routers.user
-# /api/v1/realtime, /api/v1/realtime/by_sn/{sn}, /api/v1/register, /api/v1/login,
-# /api/v1/getinfo, /api/v1/logout 均已迁移到 routers（此处删除原定义）
 
 COLUMNS = """
 r.device_id, d.device_sn, r.updated_at,
@@ -68,7 +47,14 @@ app.include_router(alarm_router.router)
 @app.get(
     "/api/v1/realtime/by_sn/{device_sn}",
     tags=["管理员/客服 | Admin/Service"],
-    summary="根据设备SN获取实时数据 | Get Realtime Data by Device SN"
+    summary="根据设备SN获取实时数据 | Get Realtime Data by Device SN",
+    description="""
+**权限要求 | Required Role**: admin, service, support
+
+根据设备序列号查询该设备的实时数据（包含在线状态）。
+
+Query real-time data by device serial number (including online status).
+"""
 )
 async def get_realtime_by_sn(device_sn: str, user=Depends(get_current_user)):
     if user["role"] not in ("admin", "service", "support"):
@@ -84,10 +70,10 @@ async def get_realtime_by_sn(device_sn: str, user=Depends(get_current_user)):
         if not row:
             raise HTTPException(status_code=404, detail="实时数据不存在")
     d = dict(row)
-    d["online"] = online_flag(d["updated_at"], settings.FRESH_SECS)
+    d["online"] = online_flag(d["updated_at"], DEVICE_FRESH_SECS)
     return d
 
-# ---------------- 其余未迁出接口保持不变 ----------------
+# ---------------- 历史能耗聚合 ----------------
 
 class HistoryDataAgg(BaseModel):
     device_id: int
@@ -98,8 +84,8 @@ class HistoryDataAgg(BaseModel):
     charge_wh_total: Optional[int]
     discharge_wh_total: Optional[int]
     pv_wh_total: Optional[int]
-    grid_wh_total: Optional[int]   # 新增
-    load_wh_total: Optional[int]   # 新增：家庭/负载累计用电量
+    grid_wh_total: Optional[int]
+    load_wh_total: Optional[int]
 
 class HistoryAggListResponse(BaseModel):
     items: List[HistoryDataAgg]
@@ -112,7 +98,21 @@ class HistoryAggListResponse(BaseModel):
     response_model=HistoryAggListResponse,
     tags=["管理员/客服 | Admin/Service"],
     summary="管理员按设备SN查询历史能耗聚合数据",
-    description="管理员或客服可通过设备SN查询该设备的历史能耗聚合数据，支持按固定周期或指定日期（按小时）聚合。"
+    description="""
+**权限要求 | Required Role**: admin, service, support
+
+管理员或客服可通过设备SN查询该设备的历史能耗聚合数据，支持按固定周期或指定日期（按小时）聚合。
+
+Admin/Service/Support can query device historical energy aggregation data by device SN.
+
+**支持的聚合周期 | Supported Periods**:
+- `today`: 今日按小时聚合 | Hourly aggregation for today
+- `week`: 本周按天聚合 | Daily aggregation for this week
+- `month`: 本月按天聚合 | Daily aggregation for this month
+- `quarter`: 本季度按月聚合 | Monthly aggregation for this quarter
+- `year`: 本年按月聚合 | Monthly aggregation for this year
+- `date`: 指定日期按小时聚合（覆盖period）| Hourly aggregation for specific date (overrides period)
+"""
 )
 async def admin_history_by_sn(
     device_sn: str = Query(..., description="设备序列号"),
@@ -230,9 +230,19 @@ async def admin_history_by_sn(
     tags=["管理员/客服 | Admin/Service"],
     summary="数据库健康与性能指标 | Database Health & Performance Metrics",
     description="""
+**权限要求 | Required Role**: admin, service
+
 仅管理员和客服可用。返回数据库连接数、活跃连接、慢查询、缓存命中率、死锁数、慢SQL历史等多项数据库健康与性能指标。
 
 Admin and service only. Returns database connection count, active connections, slow queries, cache hit rate, deadlocks, slow SQL history and other health/performance metrics.
+
+📊 **返回指标 | Metrics Returned**:
+- 连接数统计（总数/活跃/空闲）| Connection stats (total/active/idle)
+- 慢查询列表（>5秒）| Slow queries (>5s)
+- 数据库大小 & 表大小 | DB size & table sizes
+- 缓存命中率 | Cache hit rate
+- 死锁数量 | Deadlock count
+- 历史慢SQL统计 | Historical slow SQL stats
 """
 )
 async def db_metrics(user=Depends(get_current_user)):
@@ -404,12 +414,19 @@ async def startup_event():
     asyncio.create_task(cleanup_rpc_logs())
     asyncio.create_task(cleanup_alarm_history())
 
-
 @app.get(
     "/api/v1/devices/online_summary",
     tags=["管理员/客服 | Admin/Service"],
     summary="设备在线统计 | Device Online Summary",
-    description="返回设备总数、在线数、离线数；按最近60秒内有上报判定为在线。"
+    description="""
+**权限要求 | Required Role**: admin, service, support
+
+返回设备总数、在线数、离线数；按最近60秒内有上报判定为在线。
+
+Returns total devices, online devices, and offline devices. Devices with data reported within the last 60 seconds are considered online.
+
+📝 **在线判断标准 | Online Criteria**: 60秒内有数据上报 | Data reported within 60 seconds
+"""
 )
 async def devices_online_summary(
     user=Depends(get_current_user)
