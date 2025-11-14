@@ -47,7 +47,6 @@ class AlarmConfirmBySNAndCodeRequest(BaseModel):
 @router.get(
     "/admin",
     response_model=AlarmListResponse,
-    tags=["管理员/客服 | Admin/Service"],
     summary="报警管理查询 | Query All Alarms (Admin/Service)",
     description="管理员/客服可按设备序列号、状态、级别、code等筛选报警。"
 )
@@ -106,7 +105,6 @@ async def list_all_alarms(
 # 按code批量确认报警
 @router.post(
     "/admin/batch_confirm",
-    tags=["管理员/客服 | Admin/Service"],
     summary="按code批量确认报警 | Batch Confirm Alarms By Code",
     description="管理员/客服按报警code批量确认所有未确认的报警（只操作当前报警表，历史报警不能确认）。"
 )
@@ -131,7 +129,6 @@ async def batch_confirm_alarm_by_code(
 # 统计未处理报警数量
 @router.get(
     "/unhandled_count",
-    tags=["管理员/客服 | Admin/Service"],
     summary="统计未处理报警数量（含各等级） | Count Unhandled Alarms (by Level)",
     description="仅管理员和客服可用。统计所有未处理（active/confirmed）报警的总数量及各等级数量。"
 )
@@ -160,7 +157,6 @@ async def count_unhandled_alarms(user=Depends(get_current_user)):
 # 按设备SN和code确认报警
 @router.post(
     "/admin/confirm",
-    tags=["管理员/客服 | Admin/Service"],
     summary="按设备SN和code确认报警 | Confirm Alarms By Device SN and Code",
     description="管理员/客服按设备SN和code确认所有未确认的报警（只操作当前报警表，历史报警不能确认）。"
 )
