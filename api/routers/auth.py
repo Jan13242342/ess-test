@@ -4,18 +4,14 @@ from datetime import datetime, timezone, timedelta
 from random import randint
 from typing import Dict
 from fastapi import APIRouter, HTTPException, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import text
 from main import engine
 from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, EMAIL_CODE_EXPIRE_MINUTES
+from deps import bearer_scheme, get_current_user  # 使用统一的 bearer_scheme
 
 router = APIRouter(prefix="/api/v1", tags=["鉴权 | Authentication"])
-
-security = HTTPBearer()
-# SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-in-production")
-# ALGORITHM = "HS256"
-# ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "10080"))  # 默认7天
 
 # ==================== 模型定义 ====================
 
@@ -243,30 +239,24 @@ Return basic info of the current logged-in user.
 - 需在请求头携带有效 Token | Valid token required in header
 """
 )
-async def get_info(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    try:
-        token = credentials.credentials
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id = payload.get("user_id")
-        
-        async with engine.connect() as conn:
-            result = await conn.execute(
-                text("SELECT username, email, role FROM users WHERE id=:uid"),
-                {"uid": user_id}
-            )
-            row = result.first()
-            if not row:
-                raise HTTPException(status_code=404, detail="用户不存在")
-            info = row._mapping
-            return {
-                "username": info["username"],
-                "email": info["email"],
-                "role": info["role"]
-            }
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token已过期")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="无效的Token")
+async def get_info(user=Depends(get_current_user)):
+    """使用统一的 get_current_user 依赖"""
+    user_id = user["user_id"]
+    
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            text("SELECT username, email, role FROM users WHERE id=:uid"),
+            {"uid": user_id}
+        )
+        row = result.first()
+        if not row:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        info = row._mapping
+        return {
+            "username": info["username"],
+            "email": info["email"],
+            "role": info["role"]
+        }
 
 # ==================== 用户登出 ====================
 
