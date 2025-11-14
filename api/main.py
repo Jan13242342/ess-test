@@ -1,9 +1,11 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date, time as dtime, timezone
 from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy import text
-from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy import text, func
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
+from typing import Optional, List
 import asyncio
 import json
 import os
@@ -86,7 +88,6 @@ async def get_realtime_by_sn(device_sn: str, user=Depends(get_current_user)):
     return d
 
 # ---------------- 其余未迁出接口保持不变 ----------------
-from sqlalchemy import func
 
 class HistoryDataAgg(BaseModel):
     device_id: int
