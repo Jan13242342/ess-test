@@ -135,7 +135,7 @@ async def get_latest_firmware(
     current: Optional[str] = Query(None),
     user=Depends(get_current_user)
 ):
-    if user["role"] not in ("admin", "service", "support"):
+    if user["role"] not in ("admin", "service", "support", "user"):
         raise HTTPException(status_code=403, detail="无权限 | Forbidden")
     device_type = device_type.strip().upper()
     hardware_version = hardware_version.strip().upper()
@@ -191,15 +191,19 @@ async def get_latest_firmware(
 @router.get(
     "/latest-staging",
     summary="获取最新测试固件 | Get Latest Draft/Testing Firmware",
-    description="返回 draft/testing 状态下、指定硬件大版本可用的最新固件。"
+    description="需指定 draft/testing 状态，返回对应状态下最新固件。"
 )
 async def get_latest_staging_firmware(
     device_type: str = Query(...),
     hardware_version: str = Query(..., description="设备硬件版本，格式如 V1.0"),
+    status: str = Query(..., description="固件状态：draft 或 testing"),
     user=Depends(get_current_user)
 ):
-    if user["role"] not in ("admin", "service", "support"):
+    if user["role"] not in ("admin", "service", "support", "user"):
         raise HTTPException(status_code=403, detail="无权限 | Forbidden")
+    status = status.strip().lower()
+    if status not in {"draft", "testing"}:
+        raise HTTPException(status_code=400, detail="状态必须为 draft/testing | Status must be draft/testing")
     device_type = device_type.strip().upper()
     hardware_version = hardware_version.strip().upper()
     if not HW_VERSION_PATTERN.fullmatch(hardware_version):
@@ -207,51 +211,45 @@ async def get_latest_staging_firmware(
     hw_major = hardware_version.split(".", 1)[0]
 
     async with engine.connect() as conn:
-        query = text("""
-            SELECT id, device_type, version, filename, file_size, md5, sha256,
-                   notes, release_notes, uploaded_at, force_update, download_count,
-                   min_hardware_version, status
-            FROM firmware_files
-            WHERE device_type=:device_type
-              AND status=:status
-              AND is_active=TRUE
-              AND split_part(upper(min_hardware_version), '.', 1) = :hw_major
-            ORDER BY
-              COALESCE(NULLIF(split_part(split_part(version,'-',1),'.',1),''),'0')::int DESC,
-              COALESCE(NULLIF(split_part(split_part(version,'-',1),'.',2),''),'0')::int DESC,
-              COALESCE(NULLIF(split_part(split_part(version,'-',1),'.',3),''),'0')::int DESC,
-              uploaded_at DESC
-            LIMIT 1
-        """)
+        row = (await conn.execute(
+            text("""
+                SELECT id, device_type, version, filename, file_size, md5, sha256,
+                       notes, release_notes, uploaded_at, force_update, download_count,
+                       min_hardware_version, status
+                FROM firmware_files
+                WHERE device_type=:device_type
+                  AND status=:status
+                  AND is_active=TRUE
+                  AND split_part(upper(min_hardware_version), '.', 1) = :hw_major
+                ORDER BY
+                  COALESCE(NULLIF(split_part(split_part(version,'-',1),'.',1),''),'0')::int DESC,
+                  COALESCE(NULLIF(split_part(split_part(version,'-',1),'.',2),''),'0')::int DESC,
+                  COALESCE(NULLIF(split_part(split_part(version,'-',1),'.',3),''),'0')::int DESC,
+                  uploaded_at DESC
+                LIMIT 1
+            """),
+            {"device_type": device_type, "hw_major": hw_major, "status": status},
+        )).mappings().first()
 
-        async def fetch_latest(status_value: str):
-            row = (await conn.execute(
-                query,
-                {"device_type": device_type, "hw_major": hw_major, "status": status_value}
-            )).mappings().first()
-            if not row:
-                return None
-            return {
-                "firmware_id": row["id"],
-                "device_type": row["device_type"],
-                "version": row["version"],
-                "status": row["status"],
-                "download_url": f"/ota/{row['filename']}",
-                "md5": row["md5"],
-                "sha256": row["sha256"],
-                "size": row["file_size"],
-                "force_update": row["force_update"],
-                "notes": row["notes"],
-                "release_notes": row["release_notes"],
-                "uploaded_at": row["uploaded_at"],
-                "min_hardware_version": row["min_hardware_version"],
-                "download_count": row["download_count"],
-            }
+    if not row:
+        raise HTTPException(status_code=404, detail="未找到固件 | Firmware not found")
 
-        draft = await fetch_latest("draft")
-        testing = await fetch_latest("testing")
-
-    return {"draft": draft, "testing": testing}
+    return {
+        "firmware_id": row["id"],
+        "device_type": row["device_type"],
+        "version": row["version"],
+        "status": row["status"],
+        "download_url": f"/ota/{row['filename']}",
+        "md5": row["md5"],
+        "sha256": row["sha256"],
+        "size": row["file_size"],
+        "force_update": row["force_update"],
+        "notes": row["notes"],
+        "release_notes": row["release_notes"],
+        "uploaded_at": row["uploaded_at"],
+        "min_hardware_version": row["min_hardware_version"],
+        "download_count": row["download_count"],
+    }
 
 @router.get(
     "/list",
