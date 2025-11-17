@@ -18,7 +18,7 @@ END$$;
 CREATE TABLE IF NOT EXISTS firmware_files (
   id BIGSERIAL PRIMARY KEY,
   device_type TEXT NOT NULL CHECK (device_type <> ''),
-  version TEXT NOT NULL CHECK (version ~ '^\d+(\.\d+){0,2}$'), -- 1 or 1.2 or 1.2.3
+  version TEXT NOT NULL CHECK (version ~ '^\d+\.\d+\.\d+-\d{8}$'), -- 1.0.0-20251117
   filename TEXT NOT NULL CHECK (filename ~* '\.bin$'),
   file_size INT NOT NULL CHECK (file_size > 0),
   md5 TEXT NOT NULL CHECK (md5 ~ '^[0-9a-f]{32}$'),
