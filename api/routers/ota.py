@@ -186,6 +186,7 @@ async def get_latest_firmware(
         "notes": row["notes"],
         "release_notes": row["release_notes"],
         "uploaded_at": row["uploaded_at"],
+        "min_hardware_version": row["min_hardware_version"],
     }
 
 @router.get(
