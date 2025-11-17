@@ -147,7 +147,7 @@ async def get_latest_firmware(
             text("""
                 SELECT id, device_type, version, filename, file_size, md5, sha256,
                        notes, release_notes, uploaded_at, force_update, download_count,
-                       min_hardware_version
+                       min_hardware_version, status
                 FROM firmware_files
                 WHERE device_type=:device_type
                   AND status='released'
