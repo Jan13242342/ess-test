@@ -39,23 +39,23 @@ async def upload_firmware(
     user=Depends(get_current_user)
 ):
     if user["role"] not in ("admin", "service"):
-        raise HTTPException(status_code=403, detail="无权限")
+        raise HTTPException(status_code=403, detail="无权限 | Forbidden")
     if status not in {"draft", "testing", "released", "deprecated"}:
-        raise HTTPException(status_code=400, detail="状态非法")
+        raise HTTPException(status_code=400, detail="状态非法 | Invalid status")
     if not file.filename.lower().endswith(".bin"):
-        raise HTTPException(status_code=400, detail="只能上传 .bin")
+        raise HTTPException(status_code=400, detail="只能上传 .bin | Only .bin files allowed")
 
     device_type = device_type.strip().upper()
     version = version.strip()
     if not VERSION_PATTERN.fullmatch(version):
-        raise HTTPException(status_code=400, detail="版本号必须为 1.0.0-YYYYMMDD 格式")
+        raise HTTPException(status_code=400, detail="版本号必须为 1.0.0-YYYYMMDD 格式 | Version must be 1.0.0-YYYYMMDD")
     min_hardware_version = min_hardware_version.strip().upper()
     if not HW_VERSION_PATTERN.fullmatch(min_hardware_version):
-        raise HTTPException(status_code=400, detail="最低硬件版本号必须为 v1.0 格式")
+        raise HTTPException(status_code=400, detail="最低硬件版本号必须为 V1.0 格式 | Min HW version must be V1.0")
     status = status.strip().lower()
     data = await file.read()
     if not data:
-        raise HTTPException(status_code=400, detail="文件为空")
+        raise HTTPException(status_code=400, detail="文件为空 | File is empty")
     md5 = hashlib.md5(data).hexdigest()
     sha256 = hashlib.sha256(data).hexdigest()
     safe_name = f"{device_type}-{version}.bin"
@@ -68,9 +68,9 @@ async def upload_firmware(
             {"device_type": device_type, "version": version},
         )
         if exists:
-            raise HTTPException(status_code=409, detail="该设备类型与版本的固件已存在")
+            raise HTTPException(status_code=409, detail="该设备类型与版本的固件已存在 | Firmware already exists")
     if os.path.exists(path):
-        raise HTTPException(status_code=409, detail="同名固件文件已存在")
+        raise HTTPException(status_code=409, detail="同名固件文件已存在 | File name already exists")
 
     with open(path, "wb") as f:
         f.write(data)
@@ -131,16 +131,16 @@ async def upload_firmware(
 )
 async def get_latest_firmware(
     device_type: str = Query(...),
-    hardware_version: str = Query(..., description="设备硬件版本，格式如 V5.4"),
+    hardware_version: str = Query(..., description="设备硬件版本，格式如 V1.0"),
     current: Optional[str] = Query(None),
     user=Depends(get_current_user)
 ):
     if user["role"] not in ("admin", "service", "support"):
-        raise HTTPException(status_code=403, detail="无权限")
+        raise HTTPException(status_code=403, detail="无权限 | Forbidden")
     device_type = device_type.strip().upper()
     hardware_version = hardware_version.strip().upper()
     if not HW_VERSION_PATTERN.fullmatch(hardware_version):
-        raise HTTPException(status_code=400, detail="硬件版本号必须为 V5.4 格式")
+        raise HTTPException(status_code=400, detail="硬件版本号必须为 V1.0 格式 | Hardware version must be V1.0")
     hw_major = hardware_version.split(".", 1)[0]
     async with engine.connect() as conn:
         row = (await conn.execute(
@@ -163,7 +163,7 @@ async def get_latest_firmware(
             {"device_type": device_type, "hw_major": hw_major},
         )).mappings().first()
         if not row:
-            raise HTTPException(status_code=404, detail="未找到固件")
+            raise HTTPException(status_code=404, detail="未找到固件 | Firmware not found")
 
     latest_ver = row["version"]
     current_version = current.strip() if current else None
@@ -202,9 +202,9 @@ async def list_firmware(
     user=Depends(get_current_user)
 ):
     if user["role"] not in ("admin", "service", "support"):
-        raise HTTPException(status_code=403, detail="无权限")
+        raise HTTPException(status_code=403, detail="无权限 | Forbidden")
     if status and status not in {"draft", "testing", "released", "deprecated"}:
-        raise HTTPException(status_code=400, detail="状态非法")
+        raise HTTPException(status_code=400, detail="状态非法 | Invalid status")
     device_type = device_type.strip().upper()
 
     filters = ["device_type = :device_type"]
