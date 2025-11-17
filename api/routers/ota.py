@@ -23,7 +23,7 @@ def _parse_semver(v: str) -> tuple[int, int, int]:
     description="仅 admin/service。写入共享目录，由 Nginx 静态下载（/ota/{device_type}-{version}.bin）。"
 )
 async def upload_firmware(
-    device_type: str = Query(..., description="设备类型，如 esp32"),
+    device_type: str = Query(..., description="设备类型，如 ESP32"),
     version: str = Query(..., description="版本号，如 1.2.3"),
     status: str = Query("released", description="draft/testing/released/deprecated"),
     force_update: bool = Query(False, description="是否强制更新"),
@@ -40,6 +40,7 @@ async def upload_firmware(
     if not file.filename.lower().endswith(".bin"):
         raise HTTPException(status_code=400, detail="只能上传 .bin")
 
+    device_type = device_type.strip().upper()
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="文件为空")
@@ -47,6 +48,17 @@ async def upload_firmware(
     sha256 = hashlib.sha256(data).hexdigest()
     safe_name = f"{device_type}-{version}.bin"
     path = os.path.join(FIRMWARE_DIR, safe_name)
+
+    # 冲突检测：数据库 + 文件
+    async with engine.connect() as conn:
+        exists = await conn.scalar(
+            text("SELECT 1 FROM firmware_files WHERE device_type=:device_type AND version=:version"),
+            {"device_type": device_type, "version": version},
+        )
+        if exists:
+            raise HTTPException(status_code=409, detail="该设备类型与版本的固件已存在")
+    if os.path.exists(path):
+        raise HTTPException(status_code=409, detail="同名固件文件已存在")
 
     with open(path, "wb") as f:
         f.write(data)
@@ -68,18 +80,6 @@ async def upload_firmware(
                     :notes, :release_notes, :status, TRUE, :force_update,
                     :min_hardware_version, :uploaded_by
                 )
-                ON CONFLICT (device_type, version) DO UPDATE
-                  SET filename=EXCLUDED.filename,
-                      file_size=EXCLUDED.file_size,
-                      md5=EXCLUDED.md5,
-                      sha256=EXCLUDED.sha256,
-                      notes=EXCLUDED.notes,
-                      release_notes=EXCLUDED.release_notes,
-                      status=EXCLUDED.status,
-                      force_update=EXCLUDED.force_update,
-                      min_hardware_version=EXCLUDED.min_hardware_version,
-                      uploaded_by=EXCLUDED.uploaded_by,
-                      uploaded_at=now()
             """),
             {
                 "device_type": device_type,
