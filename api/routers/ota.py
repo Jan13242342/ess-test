@@ -222,4 +222,10 @@ async def list_firmware(
             params
         )).mappings().all()
 
-    return {"items": [dict(row) for row in rows], "page": page, "page_size": page_size, "total": total}
+    items = []
+    for row in rows:
+        data = dict(row)
+        data["download_url"] = f"/ota/{row['filename']}"
+        items.append(data)
+
+    return {"items": items, "page": page, "page_size": page_size, "total": total}
