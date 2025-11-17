@@ -176,17 +176,16 @@ async def get_latest_firmware(
         "firmware_id": row["id"],
         "device_type": row["device_type"],
         "latest_version": latest_ver,
-        "has_update": has_update,
         "download_url": f"/ota/{row['filename']}",
         "md5": row["md5"],
         "sha256": row["sha256"],
         "size": row["file_size"],
         "force_update": row["force_update"],
-        "download_count": row["download_count"],
         "notes": row["notes"],
         "release_notes": row["release_notes"],
         "uploaded_at": row["uploaded_at"],
         "min_hardware_version": row["min_hardware_version"],
+        "status": row["status"],
     }
 
 @router.get(
