@@ -50,6 +50,7 @@ async def upload_firmware(
         raise HTTPException(status_code=400, detail="版本号必须为 1.0.0-YYYYMMDD 格式")
     status = status.strip().lower()
     min_hardware_version = min_hardware_version.strip()
+    data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="文件为空")
     md5 = hashlib.md5(data).hexdigest()
