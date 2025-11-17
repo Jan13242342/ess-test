@@ -46,9 +46,9 @@ CREATE INDEX IF NOT EXISTS idx_fw_type_uploaded_at
 CREATE INDEX IF NOT EXISTS idx_fw_type_semver_desc
   ON firmware_files (
     device_type,
-    (COALESCE(NULLIF(split_part(version, '.', 1), ''), '0')::int) DESC,
-    (COALESCE(NULLIF(split_part(version, '.', 2), ''), '0')::int) DESC,
-    (COALESCE(NULLIF(split_part(version, '.', 3), ''), '0')::int) DESC,
+    (COALESCE(NULLIF(split_part(split_part(version, '-', 1), '.', 1), ''), '0')::int) DESC,
+    (COALESCE(NULLIF(split_part(split_part(version, '-', 1), '.', 2), ''), '0')::int) DESC,
+    (COALESCE(NULLIF(split_part(split_part(version, '-', 1), '.', 3), ''), '0')::int) DESC,
     uploaded_at DESC
   );
 
