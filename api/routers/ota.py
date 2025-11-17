@@ -12,17 +12,15 @@ from config import FIRMWARE_DIR
 router = APIRouter(prefix="/api/v1/firmware", tags=["固件管理 | Firmware/OTA"])
 
 VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+-\d{8}$")
-HW_VERSION_PATTERN = re.compile(r"^v\d+\.\d+$")
+HW_VERSION_PATTERN = re.compile(r"^V\d+\.\d+$")
 
-def _parse_version(v: str) -> tuple[int, int]:
-    core = v.lstrip("vV")
-    parts = core.split(".")
-    if len(parts) != 2:
-        return (0, 0)
+def _parse_version(v: str) -> tuple[int, int, int, int]:
     try:
-        return int(parts[0]), int(parts[1])
-    except ValueError:
-        return (0, 0)
+        base, date = v.split("-", 1)
+        major, minor, patch = (int(x) for x in base.split("."))
+        return major, minor, patch, int(date)
+    except Exception:
+        return (0, 0, 0, 0)
 
 @router.post(
     "/upload",
@@ -51,7 +49,7 @@ async def upload_firmware(
     version = version.strip()
     if not VERSION_PATTERN.fullmatch(version):
         raise HTTPException(status_code=400, detail="版本号必须为 1.0.0-YYYYMMDD 格式")
-    min_hardware_version = min_hardware_version.strip()
+    min_hardware_version = min_hardware_version.strip().upper()
     if not HW_VERSION_PATTERN.fullmatch(min_hardware_version):
         raise HTTPException(status_code=400, detail="最低硬件版本号必须为 v1.0 格式")
     status = status.strip().lower()
@@ -133,21 +131,28 @@ async def upload_firmware(
 )
 async def get_latest_firmware(
     device_type: str = Query(...),
+    hardware_version: str = Query(..., description="设备硬件版本，格式如 V5.4"),
     current: Optional[str] = Query(None),
     user=Depends(get_current_user)
 ):
     if user["role"] not in ("admin", "service", "support"):
         raise HTTPException(status_code=403, detail="无权限")
     device_type = device_type.strip().upper()
+    hardware_version = hardware_version.strip().upper()
+    if not HW_VERSION_PATTERN.fullmatch(hardware_version):
+        raise HTTPException(status_code=400, detail="硬件版本号必须为 V5.4 格式")
+    hw_major = hardware_version.split(".", 1)[0]
     async with engine.connect() as conn:
         row = (await conn.execute(
             text("""
                 SELECT id, device_type, version, filename, file_size, md5, sha256,
-                       notes, release_notes, uploaded_at, force_update, download_count
+                       notes, release_notes, uploaded_at, force_update, download_count,
+                       min_hardware_version
                 FROM firmware_files
                 WHERE device_type=:device_type
                   AND status='released'
                   AND is_active=TRUE
+                  AND split_part(upper(min_hardware_version), '.', 1) = :hw_major
                 ORDER BY
                   COALESCE(NULLIF(split_part(split_part(version,'-',1),'.',1),''),'0')::int DESC,
                   COALESCE(NULLIF(split_part(split_part(version,'-',1),'.',2),''),'0')::int DESC,
@@ -155,13 +160,18 @@ async def get_latest_firmware(
                   uploaded_at DESC
                 LIMIT 1
             """),
-            {"device_type": device_type},
+            {"device_type": device_type, "hw_major": hw_major},
         )).mappings().first()
         if not row:
             raise HTTPException(status_code=404, detail="未找到固件")
 
     latest_ver = row["version"]
-    has_update = (current is not None) and (_parse_version(latest_ver) > _parse_version(current))
+    current_version = current.strip() if current else None
+    has_update = (
+        current_version is not None
+        and VERSION_PATTERN.fullmatch(current_version)
+        and _parse_version(latest_ver) > _parse_version(current_version)
+    )
     return {
         "firmware_id": row["id"],
         "device_type": row["device_type"],
