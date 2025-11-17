@@ -12,14 +12,17 @@ from config import FIRMWARE_DIR
 router = APIRouter(prefix="/api/v1/firmware", tags=["固件管理 | Firmware/OTA"])
 
 VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+-\d{8}$")
+HW_VERSION_PATTERN = re.compile(r"^v\d+\.\d+$")
 
-def _parse_semver(v: str) -> tuple[int, int, int]:
+def _parse_version(v: str) -> tuple[int, int]:
+    core = v.lstrip("vV")
+    parts = core.split(".")
+    if len(parts) != 2:
+        return (0, 0)
     try:
-        base = v.split("-", 1)[0]
-        a, b, c = (int(x) for x in (base.split(".") + ["0", "0", "0"])[:3])
-        return a, b, c
-    except Exception:
-        return (0, 0, 0)
+        return int(parts[0]), int(parts[1])
+    except ValueError:
+        return (0, 0)
 
 @router.post(
     "/upload",
@@ -48,8 +51,10 @@ async def upload_firmware(
     version = version.strip()
     if not VERSION_PATTERN.fullmatch(version):
         raise HTTPException(status_code=400, detail="版本号必须为 1.0.0-YYYYMMDD 格式")
-    status = status.strip().lower()
     min_hardware_version = min_hardware_version.strip()
+    if not HW_VERSION_PATTERN.fullmatch(min_hardware_version):
+        raise HTTPException(status_code=400, detail="最低硬件版本号必须为 v1.0 格式")
+    status = status.strip().lower()
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="文件为空")
@@ -155,7 +160,7 @@ async def get_latest_firmware(
             raise HTTPException(status_code=404, detail="未找到固件")
 
     latest_ver = row["version"]
-    has_update = (current is not None) and (_parse_semver(latest_ver) > _parse_semver(current))
+    has_update = (current is not None) and (_parse_version(latest_ver) > _parse_version(current))
     return {
         "firmware_id": row["id"],
         "device_type": row["device_type"],
