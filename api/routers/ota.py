@@ -1,4 +1,5 @@
 import os
+import re
 import hashlib
 from typing import Optional
 from fastapi import APIRouter, Query, HTTPException, Depends, UploadFile, File
@@ -10,9 +11,12 @@ from config import FIRMWARE_DIR
 
 router = APIRouter(prefix="/api/v1/firmware", tags=["固件管理 | Firmware/OTA"])
 
+VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+-\d{8}$")
+
 def _parse_semver(v: str) -> tuple[int, int, int]:
     try:
-        a, b, c = (int(x) for x in (v.split(".") + ["0", "0", "0"])[:3])
+        base = v.split("-", 1)[0]
+        a, b, c = (int(x) for x in (base.split(".") + ["0", "0", "0"])[:3])
         return a, b, c
     except Exception:
         return (0, 0, 0)
@@ -24,10 +28,10 @@ def _parse_semver(v: str) -> tuple[int, int, int]:
 )
 async def upload_firmware(
     device_type: str = Query(..., description="设备类型，如 ESP32"),
-    version: str = Query(..., description="版本号，如 1.2.3"),
-    status: str = Query("released", description="draft/testing/released/deprecated"),
+    version: str = Query(..., description="版本号，格式 1.0.0-YYYYMMDD"),
+    status: str = Query(..., description="draft/testing/released/deprecated（必填）"),
     force_update: bool = Query(False, description="是否强制更新"),
-    min_hardware_version: Optional[str] = Query(None, description="最低硬件版本要求"),
+    min_hardware_version: str = Query(..., description="最低硬件版本要求"),
     notes: Optional[str] = Query(None, description="简短备注"),
     release_notes: Optional[str] = Query(None, description="详细发布说明（Markdown）"),
     file: UploadFile = File(...),
@@ -41,7 +45,11 @@ async def upload_firmware(
         raise HTTPException(status_code=400, detail="只能上传 .bin")
 
     device_type = device_type.strip().upper()
-    data = await file.read()
+    version = version.strip()
+    if not VERSION_PATTERN.fullmatch(version):
+        raise HTTPException(status_code=400, detail="版本号必须为 1.0.0-YYYYMMDD 格式")
+    status = status.strip().lower()
+    min_hardware_version = min_hardware_version.strip()
     if not data:
         raise HTTPException(status_code=400, detail="文件为空")
     md5 = hashlib.md5(data).hexdigest()
@@ -107,6 +115,7 @@ async def upload_firmware(
         "sha256": sha256,
         "download_url": f"/ota/{safe_name}",
         "force_update": force_update,
+        "min_hardware_version": min_hardware_version,
         "notes": notes,
         "release_notes": release_notes,
     }
