@@ -138,6 +138,7 @@ async def get_latest_firmware(
 ):
     if user["role"] not in ("admin", "service", "support"):
         raise HTTPException(status_code=403, detail="无权限")
+    device_type = device_type.strip().upper()
     async with engine.connect() as conn:
         row = (await conn.execute(
             text("""
@@ -193,6 +194,7 @@ async def list_firmware(
         raise HTTPException(status_code=403, detail="无权限")
     if status and status not in {"draft", "testing", "released", "deprecated"}:
         raise HTTPException(status_code=400, detail="状态非法")
+    device_type = device_type.strip().upper()
 
     filters = ["device_type = :device_type"]
     params = {"device_type": device_type, "limit": page_size, "offset": (page - 1) * page_size}
