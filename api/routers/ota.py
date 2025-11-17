@@ -239,3 +239,47 @@ async def list_firmware(
         items.append(data)
 
     return {"items": items, "page": page, "page_size": page_size, "total": total}
+
+@router.delete(
+    "/{firmware_id}",
+    summary="删除固件 | Delete Firmware",
+    description="仅 admin/service，可同时移除物理文件与校验文件。"
+)
+async def delete_firmware(
+    firmware_id: int,
+    user=Depends(get_current_user)
+):
+    if user["role"] not in ("admin", "service"):
+        raise HTTPException(status_code=403, detail="无权限 | Forbidden")
+
+    async with engine.begin() as conn:
+        row = (await conn.execute(
+            text("SELECT device_type, version, filename FROM firmware_files WHERE id=:id"),
+            {"id": firmware_id}
+        )).mappings().first()
+        if not row:
+            raise HTTPException(status_code=404, detail="固件不存在 | Firmware not found")
+
+        await conn.execute(
+            text("DELETE FROM firmware_files WHERE id=:id"),
+            {"id": firmware_id}
+        )
+
+    targets = [
+        os.path.join(FIRMWARE_DIR, row["filename"]),
+        os.path.join(FIRMWARE_DIR, f"{row['filename']}.md5"),
+        os.path.join(FIRMWARE_DIR, f"{row['filename']}.sha256"),
+    ]
+    for path in targets:
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except OSError:
+            pass
+
+    return {
+        "status": "deleted",
+        "firmware_id": firmware_id,
+        "device_type": row["device_type"],
+        "version": row["version"]
+    }
