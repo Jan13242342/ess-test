@@ -133,10 +133,7 @@ async def get_latest_firmware(
     device_type: str = Query(...),
     hardware_version: str = Query(..., description="设备硬件版本，格式如 V1.0"),
     current: Optional[str] = Query(None),
-    user=Depends(get_current_user)
 ):
-    if user["role"] not in ("admin", "service", "support", "user"):
-        raise HTTPException(status_code=403, detail="无权限 | Forbidden")
     device_type = device_type.strip().upper()
     hardware_version = hardware_version.strip().upper()
     if not HW_VERSION_PATTERN.fullmatch(hardware_version):
@@ -197,10 +194,7 @@ async def get_latest_staging_firmware(
     device_type: str = Query(...),
     hardware_version: str = Query(..., description="设备硬件版本，格式如 V1.0"),
     status: str = Query(..., description="固件状态：draft 或 testing"),
-    user=Depends(get_current_user)
 ):
-    if user["role"] not in ("admin", "service", "support", "user"):
-        raise HTTPException(status_code=403, detail="无权限 | Forbidden")
     status = status.strip().lower()
     if status not in {"draft", "testing"}:
         raise HTTPException(status_code=400, detail="状态必须为 draft/testing | Status must be draft/testing")
