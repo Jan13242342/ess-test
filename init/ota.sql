@@ -164,6 +164,19 @@ CREATE INDEX IF NOT EXISTS idx_fw_deps_firmware_id
 COMMENT ON TABLE firmware_dependencies IS '固件依赖关系表：定义固件之间的依赖/推荐/冲突关系';
 COMMENT ON COLUMN firmware_dependencies.dependency_type IS 'requires(必须)/recommends(推荐)/conflicts(冲突)';
 
+-- 固件审计表（可选，记录固件操作历史）
+-- Firmware audit table (optional, records firmware operation history)
+CREATE TABLE IF NOT EXISTS firmware_audit (
+  id BIGSERIAL PRIMARY KEY,
+  firmware_id BIGINT,
+  action TEXT NOT NULL, -- 'upload'/'delete'/'update'
+  performed_by TEXT,
+  performed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  details JSONB
+);
+
+COMMENT ON TABLE firmware_audit IS '固件审计表：记录固件操作历史';
+
 -- 完成日志
 DO $$
 BEGIN

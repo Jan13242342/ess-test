@@ -1,6 +1,7 @@
 import os
 import re
 import hashlib
+import json
 from typing import Optional
 from fastapi import APIRouter, Query, HTTPException, Depends, UploadFile, File
 from pydantic import BaseModel
@@ -107,6 +108,32 @@ async def upload_firmware(
                 "min_hardware_version": min_hardware_version,
                 "uploaded_by": user["username"],
             },
+        )
+        # 写入操作日志
+        await conn.execute(
+            text("""
+                INSERT INTO firmware_audit (firmware_id, action, performed_by, details)
+                VALUES (
+                    (SELECT id FROM firmware_files WHERE device_type=:device_type AND version=:version),
+                    'upload', :user, :details::jsonb
+                )
+            """),
+            {
+                "device_type": device_type,
+                "version": version,
+                "user": user["username"],
+                "details": json.dumps({
+                    "filename": safe_name,
+                    "file_size": len(data),
+                    "md5": md5,
+                    "sha256": sha256,
+                    "notes": notes,
+                    "release_notes": release_notes,
+                    "status": status,
+                    "force_update": force_update,
+                    "min_hardware_version": min_hardware_version,
+                })
+            }
         )
 
     return {
@@ -311,11 +338,28 @@ async def delete_firmware(
 
     async with engine.begin() as conn:
         row = (await conn.execute(
-            text("SELECT device_type, version, filename FROM firmware_files WHERE id=:id"),
+            text("SELECT id, device_type, version, filename FROM firmware_files WHERE id=:id"),
             {"id": firmware_id}
         )).mappings().first()
         if not row:
             raise HTTPException(status_code=404, detail="固件不存在 | Firmware not found")
+
+        # 写入操作日志
+        await conn.execute(
+            text("""
+                INSERT INTO firmware_audit (firmware_id, action, performed_by, details)
+                VALUES (:fid, 'delete', :user, :details::jsonb)
+            """),
+            {
+                "fid": row["id"],
+                "user": user["username"],
+                "details": json.dumps({
+                    "device_type": row["device_type"],
+                    "version": row["version"],
+                    "filename": row["filename"]
+                })
+            }
+        )
 
         await conn.execute(
             text("DELETE FROM firmware_files WHERE id=:id"),
@@ -339,4 +383,55 @@ async def delete_firmware(
         "firmware_id": firmware_id,
         "device_type": row["device_type"],
         "version": row["version"]
+    }
+
+@router.get(
+    "/audit-log",
+    summary="查询固件操作日志 | List Firmware Audit Log",
+    description="支持按固件ID、操作类型、操作人、时间范围过滤。"
+)
+async def list_firmware_audit(
+    firmware_id: Optional[int] = Query(None, description="固件ID"),
+    action: Optional[str] = Query(None, description="操作类型，如 upload/delete/update"),
+    performed_by: Optional[str] = Query(None, description="操作人"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    user=Depends(get_current_user)
+):
+    if user["role"] not in ("admin", "service", "support"):
+        raise HTTPException(status_code=403, detail="无权限 | Forbidden")
+
+    filters = []
+    params = {"limit": page_size, "offset": (page - 1) * page_size}
+    if firmware_id:
+        filters.append("firmware_id = :firmware_id")
+        params["firmware_id"] = firmware_id
+    if action:
+        filters.append("action = :action")
+        params["action"] = action
+    if performed_by:
+        filters.append("performed_by = :performed_by")
+        params["performed_by"] = performed_by
+    where_clause = " AND ".join(filters) if filters else "TRUE"
+
+    async with engine.connect() as conn:
+        total = (await conn.execute(
+            text(f"SELECT COUNT(*) FROM firmware_audit WHERE {where_clause}"), params
+        )).scalar_one()
+        rows = (await conn.execute(
+            text(f"""
+                SELECT id, firmware_id, action, performed_by, performed_at, details
+                FROM firmware_audit
+                WHERE {where_clause}
+                ORDER BY performed_at DESC
+                LIMIT :limit OFFSET :offset
+            """),
+            params
+        )).mappings().all()
+
+    return {
+        "items": [dict(row) for row in rows],
+        "page": page,
+        "page_size": page_size,
+        "total": total
     }
