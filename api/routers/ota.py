@@ -123,6 +123,8 @@ async def upload_firmware(
                 "version": version,
                 "user": user["username"],
                 "details": json.dumps({
+                    "device_type": device_type,   # <--- 补充
+                    "version": version,           # <--- 补充
                     "filename": safe_name,
                     "file_size": len(data),
                     "md5": md5,
