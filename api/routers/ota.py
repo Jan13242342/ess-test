@@ -432,12 +432,14 @@ async def list_firmware_audit(
         details = row["details"] or {}
         device_type = details.get("device_type")
         version = details.get("version")
+        status = details.get("status")
         items.append({
             "action": row["action"],
             "performed_by": row["performed_by"],
             "performed_at": row["performed_at"],
             "device_type": device_type,
             "version": version,
+            "status": status,
             "details": details
         })
 
