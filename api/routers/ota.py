@@ -115,7 +115,7 @@ async def upload_firmware(
                 INSERT INTO firmware_audit (firmware_id, action, performed_by, details)
                 VALUES (
                     (SELECT id FROM firmware_files WHERE device_type=:device_type AND version=:version),
-                    'upload', :user, :details::jsonb
+                    'upload', :user, CAST(:details AS JSONB)
                 )
             """),
             {
