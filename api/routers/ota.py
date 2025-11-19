@@ -388,10 +388,9 @@ async def delete_firmware(
 @router.get(
     "/audit-log",
     summary="查询固件操作日志 | List Firmware Audit Log",
-    description="支持按固件ID、操作类型、操作人、时间范围过滤。"
+    description="支持按操作类型、操作人、时间范围过滤。"
 )
 async def list_firmware_audit(
-    firmware_id: Optional[int] = Query(None, description="固件ID"),
     action: Optional[str] = Query(None, description="操作类型，如 upload/delete/update"),
     performed_by: Optional[str] = Query(None, description="操作人"),
     page: int = Query(1, ge=1),
@@ -403,9 +402,6 @@ async def list_firmware_audit(
 
     filters = []
     params = {"limit": page_size, "offset": (page - 1) * page_size}
-    if firmware_id:
-        filters.append("firmware_id = :firmware_id")
-        params["firmware_id"] = firmware_id
     if action:
         filters.append("action = :action")
         params["action"] = action
@@ -420,7 +416,7 @@ async def list_firmware_audit(
         )).scalar_one()
         rows = (await conn.execute(
             text(f"""
-                SELECT id, firmware_id, action, performed_by, performed_at, details
+                SELECT action, performed_by, performed_at, details
                 FROM firmware_audit
                 WHERE {where_clause}
                 ORDER BY performed_at DESC
@@ -429,8 +425,22 @@ async def list_firmware_audit(
             params
         )).mappings().all()
 
+    items = []
+    for row in rows:
+        details = row["details"] or {}
+        device_type = details.get("device_type")
+        version = details.get("version")
+        items.append({
+            "action": row["action"],
+            "performed_by": row["performed_by"],
+            "performed_at": row["performed_at"],
+            "device_type": device_type,
+            "version": version,
+            "details": details
+        })
+
     return {
-        "items": [dict(row) for row in rows],
+        "items": items,
         "page": page,
         "page_size": page_size,
         "total": total
