@@ -390,11 +390,12 @@ async def delete_firmware(
 @router.get(
     "/audit-log",
     summary="查询固件操作日志 | List Firmware Audit Log",
-    description="支持按操作类型、操作人、时间范围过滤。"
+    description="支持按操作类型、操作人、设备类型、时间范围过滤。"
 )
 async def list_firmware_audit(
     action: Optional[str] = Query(None, description="操作类型，如 upload/delete/update"),
     performed_by: Optional[str] = Query(None, description="操作人"),
+    device_type: Optional[str] = Query(None, description="设备类型，如 ESP32"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     user=Depends(get_current_user)
@@ -410,6 +411,9 @@ async def list_firmware_audit(
     if performed_by:
         filters.append("performed_by = :performed_by")
         params["performed_by"] = performed_by
+    if device_type:
+        filters.append("(details->>'device_type') = :device_type")
+        params["device_type"] = device_type.upper()
     where_clause = " AND ".join(filters) if filters else "TRUE"
 
     async with engine.connect() as conn:
@@ -430,14 +434,14 @@ async def list_firmware_audit(
     items = []
     for row in rows:
         details = row["details"] or {}
-        device_type = details.get("device_type")
+        device_type_val = details.get("device_type")
         version = details.get("version")
         status = details.get("status")
         items.append({
             "action": row["action"],
             "performed_by": row["performed_by"],
             "performed_at": row["performed_at"],
-            "device_type": device_type,
+            "device_type": device_type_val,
             "version": version,
             "status": status,
             "details": details

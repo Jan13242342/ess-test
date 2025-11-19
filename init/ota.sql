@@ -177,6 +177,19 @@ CREATE TABLE IF NOT EXISTS firmware_audit (
 
 COMMENT ON TABLE firmware_audit IS '固件审计表：记录固件操作历史';
 
+-- 审计表索引
+CREATE INDEX IF NOT EXISTS idx_firmware_audit_action_performed_by_time
+  ON firmware_audit(action, performed_by, performed_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_firmware_audit_performed_at
+  ON firmware_audit(performed_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_firmware_audit_details_device_type
+  ON firmware_audit((details->>'device_type'));
+
+CREATE INDEX IF NOT EXISTS idx_firmware_audit_details_version
+  ON firmware_audit((details->>'version'));
+
 -- 完成日志
 DO $$
 BEGIN
