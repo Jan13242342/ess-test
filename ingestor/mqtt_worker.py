@@ -92,9 +92,9 @@ def on_connect(client, userdata, flags, rc, properties=None):
     except Exception:
         code = rc
     if code == 0:
-        log("[mqtt] connected")
+        log("[mqtt] connected successfully")
     else:
-        log(f"[mqtt] connect failed rc={code}")
+        log(f"[mqtt] connection failed with rc={code}")
 
 def setup_mqtt(client, topics, log_func=None):
     if log_func:
@@ -104,5 +104,5 @@ def setup_mqtt(client, topics, log_func=None):
     client.on_message = on_message
     for topic, qos in topics:
         client.subscribe(topic, qos)
-    log("[mqtt] subscribed:", ", ".join(t for t, _ in topics))
+        log(f"[mqtt] subscribing to topic: {topic} with qos: {qos}")
     log("[mqtt] subscribed:", ", ".join(t for t, _ in topics))
