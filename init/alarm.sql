@@ -1,21 +1,21 @@
 -- 当前报警表 alarms
 CREATE TABLE IF NOT EXISTS alarms (
-  id BIGSERIAL PRIMARY KEY,                        
-  device_id BIGINT REFERENCES devices(id) ON DELETE SET NULL, 
-  alarm_type TEXT NOT NULL,                        
-  code INTEGER NOT NULL,        
-  level TEXT NOT NULL DEFAULT 'info',              
-  extra JSONB,                                     
-  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'confirmed', 'cleared')), 
-  first_triggered_at TIMESTAMPTZ NOT NULL DEFAULT now(), 
-  last_triggered_at TIMESTAMPTZ NOT NULL DEFAULT now(),  
-  repeat_count INT NOT NULL DEFAULT 1,             
-  remark TEXT,                                     
-  confirmed_at TIMESTAMPTZ,                        
-  confirmed_by TEXT,                               
-  cleared_at TIMESTAMPTZ,                          
+  id BIGSERIAL PRIMARY KEY,
+  device_id BIGINT REFERENCES devices(id) ON DELETE SET NULL,
+  alarm_type TEXT NOT NULL,
+  code INTEGER NOT NULL,
+  level TEXT NOT NULL DEFAULT 'info',
+  extra JSONB,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'confirmed', 'cleared')),
+  first_triggered_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_triggered_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  repeat_count INT NOT NULL DEFAULT 1,
+  remark TEXT,
+  confirmed_at TIMESTAMPTZ,
+  confirmed_by TEXT,
+  cleared_at TIMESTAMPTZ,
   cleared_by TEXT,
-  UNIQUE (device_id, alarm_type, code)      
+  UNIQUE (device_id, alarm_type, code)  -- 只包含这三个字段
 );
 
 CREATE INDEX IF NOT EXISTS idx_alarms_device_id ON alarms(device_id);
