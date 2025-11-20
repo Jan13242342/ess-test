@@ -24,6 +24,10 @@ CREATE INDEX IF NOT EXISTS idx_alarms_level ON alarms(level);
 CREATE INDEX IF NOT EXISTS idx_alarms_status ON alarms(status);
 CREATE INDEX IF NOT EXISTS idx_alarms_first_triggered_at ON alarms(first_triggered_at DESC);
 
+-- alarms 表联合索引
+CREATE INDEX IF NOT EXISTS idx_alarms_device_type_level
+  ON alarms(device_id, alarm_type, level);
+
 -- 历史报警表 alarm_history
 CREATE TABLE IF NOT EXISTS alarm_history (
   id BIGSERIAL PRIMARY KEY,
@@ -51,3 +55,7 @@ CREATE INDEX IF NOT EXISTS idx_alarm_history_level ON alarm_history(level);
 CREATE INDEX IF NOT EXISTS idx_alarm_history_status ON alarm_history(status);
 CREATE INDEX IF NOT EXISTS idx_alarm_history_first_triggered_at ON alarm_history(first_triggered_at DESC);
 CREATE INDEX IF NOT EXISTS idx_alarm_history_archived_at ON alarm_history(archived_at DESC);
+
+-- alarm_history 表联合索引
+CREATE INDEX IF NOT EXISTS idx_alarm_history_device_type_level
+  ON alarm_history(device_id, alarm_type, level);
