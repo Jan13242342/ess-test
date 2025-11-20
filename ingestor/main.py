@@ -138,7 +138,7 @@ INSERT INTO alarms (
   %(first_triggered_at)s, %(last_triggered_at)s, %(repeat_count)s, %(remark)s,
   %(confirmed_at)s, %(confirmed_by)s, %(cleared_at)s, %(cleared_by)s
 )
-ON CONFLICT (device_id, alarm_type, code, status)
+ON CONFLICT (device_id, alarm_type, code)
 DO UPDATE SET
   last_triggered_at = EXCLUDED.last_triggered_at,
   repeat_count = alarms.repeat_count + 1,

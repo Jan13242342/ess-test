@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS alarms (
   confirmed_by TEXT,                               
   cleared_at TIMESTAMPTZ,                          
   cleared_by TEXT,
-  UNIQUE (device_id, alarm_type, code, status)      
+  UNIQUE (device_id, alarm_type, code)      
 );
 
 CREATE INDEX IF NOT EXISTS idx_alarms_device_id ON alarms(device_id);
