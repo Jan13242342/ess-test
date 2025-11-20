@@ -6,9 +6,7 @@ from db_flushers import (
     flusher, history_flusher, alarm_flusher, para_flusher, rpc_ack_flusher, archive_alarm_worker
 )
 from dotenv import load_dotenv, find_dotenv   # ← 加上这一行
-
-def log(*args, **kwargs):
-    print(time.strftime("[%Y-%m-%d %H:%M:%S]"), *args, flush=True, **kwargs)
+from utils import log, parse_device_id, to_int, normalize, normalize_history
 
 load_dotenv(find_dotenv(".env"), override=True)
 
@@ -51,60 +49,6 @@ FIELDS = [
     "q_a", "q_b", "q_c",
     "e_pv_today", "e_load_today", "e_charge_today", "e_discharge_today"
 ]
-
-def parse_device_id(topic: str):
-    parts = topic.split("/")
-    if len(parts) >= 3 and parts[0]=="devices" and parts[2]=="realtime":
-        return parts[1]
-    return None
-
-def parse_history_device_id(topic: str):
-    parts = topic.split("/")
-    if len(parts) >= 3 and parts[0]=="devices" and parts[2]=="history":
-        return parts[1]
-    return None
-
-def parse_alarm_device_id(topic: str):
-    parts = topic.split("/")
-    if len(parts) >= 3 and parts[0]=="devices" and parts[2]=="alarm":
-        return parts[1]
-    return None
-
-def parse_para_device_id(topic: str):
-    parts = topic.split("/")
-    if len(parts) >= 3 and parts[0]=="devices" and parts[2]=="para":
-        return parts[1]
-    return None
-
-def parse_rpc_ack_device_id(topic: str):
-    parts = topic.split("/")
-    if len(parts) >= 3 and parts[0] == "devices" and parts[2] == "rpc_ack":
-        return parts[1]
-    return None
-
-def to_int(v, default=0):
-    try:
-        if v is None: return default
-        return int(v)
-    except Exception:
-        return default
-
-def normalize(sn: str, payload: dict) -> dict:
-    d = {k: 0 for k in FIELDS}
-    d["device_id"] = int(sn)
-    d["soc"] = to_int(payload.get("soc"), 0)
-    d["soh"] = to_int(payload.get("soh"), 100)
-    for k in [
-      "pv","load","grid","grid_q","batt",
-      "ac_v","ac_f",
-      "v_a","v_b","v_c",
-      "i_a","i_b","i_c",
-      "p_a","p_b","p_c",
-      "q_a","q_b","q_c",
-      "e_pv_today","e_load_today","e_charge_today","e_discharge_today",
-    ]:
-        d[k] = to_int(payload.get(k), 0)
-    return d
 
 UPSERT_SQL = """
 INSERT INTO ess_realtime_data (
