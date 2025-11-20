@@ -1,7 +1,7 @@
 import os, json, time
 import paho.mqtt.client as mqtt
 
-# 队列和 log 由 main.py 传入或全局导入   测试一下
+# 队列和 log 由 main.py 传入或全局导入
 from queue import Queue
 from threading import Event
 
@@ -42,14 +42,11 @@ def _extract_sn_from_topic(topic: str):
     return None
 
 def on_message(client, userdata, msg):
-    log(f"[mqtt_worker] on_message topic={msg.topic} payload={msg.payload}")
     try:
         topic = msg.topic
         sn = _extract_sn_from_topic(topic)
         if not sn:
-            log(f"[mqtt_worker] invalid topic format: {topic}")
             return
-        log(f"[mqtt_worker] extracted device_sn={sn}")
 
         payload = json.loads(msg.payload.decode("utf-8") or "{}")
         # attach device identifiers for downstream consumers
@@ -92,9 +89,9 @@ def on_connect(client, userdata, flags, rc, properties=None):
     except Exception:
         code = rc
     if code == 0:
-        log("[mqtt] connected successfully")
+        log("[mqtt] connected")
     else:
-        log(f"[mqtt] connection failed with rc={code}")
+        log(f"[mqtt] connect failed rc={code}")
 
 def setup_mqtt(client, topics, log_func=None):
     if log_func:
@@ -104,5 +101,4 @@ def setup_mqtt(client, topics, log_func=None):
     client.on_message = on_message
     for topic, qos in topics:
         client.subscribe(topic, qos)
-        log(f"[mqtt] subscribing to topic: {topic} with qos: {qos}")
     log("[mqtt] subscribed:", ", ".join(t for t, _ in topics))
