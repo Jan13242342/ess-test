@@ -173,21 +173,21 @@ WHERE request_id=%(request_id)s
 def on_message(client, userdata, msg):
     try:
         if msg.topic.endswith("/realtime"):
-            sn = parse_device_id(msg.topic)
+            sn = parse_device_id(msg.topic, "realtime")
             if not sn: return
             payload = json.loads(msg.payload.decode("utf-8"))
-            rec = normalize(sn, payload)
+            rec = normalize(sn, payload, FIELDS)
             q.put(rec, block=False)
 
         elif msg.topic.endswith("/history"):
-            sn = parse_history_device_id(msg.topic)
+            sn = parse_device_id(msg.topic, "history")
             if not sn: return
             payload = json.loads(msg.payload.decode("utf-8"))
             rec = normalize_history(sn, payload)
             history_q.put(rec, block=False)
 
         elif msg.topic.endswith("/alarm"):
-            sn = parse_alarm_device_id(msg.topic)
+            sn = parse_device_id(msg.topic, "alarm")
             if not sn: return
             payload = json.loads(msg.payload.decode("utf-8"))
             now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -217,7 +217,7 @@ def on_message(client, userdata, msg):
             (archive_alarm_q if should_archive else alarm_q).put(alarm, block=False)
 
         elif msg.topic.endswith("/para"):
-            sn = parse_para_device_id(msg.topic)
+            sn = parse_device_id(msg.topic, "para")
             if not sn: return
             payload = json.loads(msg.payload.decode("utf-8"))
             para = {
@@ -228,7 +228,7 @@ def on_message(client, userdata, msg):
             para_q.put(para, block=False)
 
         elif msg.topic.endswith("/rpc_ack"):
-            sn = parse_rpc_ack_device_id(msg.topic)
+            sn = parse_device_id(msg.topic, "rpc_ack")
             if not sn: return
             payload = json.loads(msg.payload.decode("utf-8"))
 
