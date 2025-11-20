@@ -1,7 +1,7 @@
 import os, json, time
 import paho.mqtt.client as mqtt
 
-# 队列和 log 由 main.py 传入或全局导入
+# 队列和 log 由 main.py 传入或全局导入   测试一下
 from queue import Queue
 from threading import Event
 
@@ -101,4 +101,5 @@ def setup_mqtt(client, topics, log_func=None):
     client.on_message = on_message
     for topic, qos in topics:
         client.subscribe(topic, qos)
+    log("[mqtt] subscribed:", ", ".join(t for t, _ in topics))
     log("[mqtt] subscribed:", ", ".join(t for t, _ in topics))
