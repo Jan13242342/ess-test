@@ -22,6 +22,7 @@ services:
       # - ./init/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
       - ./init/schema.sql:/docker-entrypoint-initdb.d/10-schema.sql:ro
       - ./init/ota.sql:/docker-entrypoint-initdb.d/20-ota.sql:ro
+      - ./init/alarm.sql:/docker-entrypoint-initdb.d/30-alarm.sql:ro   # 新增报警表
     ports:
       - "5432:5432"
   

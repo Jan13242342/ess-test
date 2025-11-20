@@ -96,6 +96,46 @@ CREATE TRIGGER trg_update_firmware_deprecated_at
   FOR EACH ROW
   EXECUTE FUNCTION update_firmware_deprecated_at();
 
+
+
+-- 固件审计表（可选，记录固件操作历史）
+-- Firmware audit table (optional, records firmware operation history)
+CREATE TABLE IF NOT EXISTS firmware_audit (
+  id BIGSERIAL PRIMARY KEY,
+  firmware_id BIGINT,
+  action TEXT NOT NULL, -- 'upload'/'delete'/'update'
+  performed_by TEXT,
+  performed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  details JSONB
+);
+
+COMMENT ON TABLE firmware_audit IS '固件审计表：记录固件操作历史';
+
+-- 审计表索引
+CREATE INDEX IF NOT EXISTS idx_firmware_audit_action_performed_by_time
+  ON firmware_audit(action, performed_by, performed_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_firmware_audit_performed_at
+  ON firmware_audit(performed_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_firmware_audit_details_device_type
+  ON firmware_audit((details->>'device_type'));
+
+CREATE INDEX IF NOT EXISTS idx_firmware_audit_details_version
+  ON firmware_audit((details->>'version'));
+
+
+
+
+-- -- -- -- -- -- -- -- -- 还没用到的表结构 -- -- -- -- -- -- -- -- --
+-- -- -- -- -- -- -- -- -- 还没用到的表结构 -- -- -- -- -- -- -- -- --
+-- -- -- -- -- -- -- -- -- 还没用到的表结构 -- -- -- -- -- -- -- -- --
+-- -- -- -- -- -- -- -- -- 还没用到的表结构 -- -- -- -- -- -- -- -- --
+-- -- -- -- -- -- -- -- -- 还没用到的表结构 -- -- -- -- -- -- -- -- --
+-- -- -- -- -- -- -- -- -- 还没用到的表结构 -- -- -- -- -- -- -- -- --
+-- -- -- -- -- -- -- -- -- 还没用到的表结构 -- -- -- -- -- -- -- -- --
+
+
 -- 设备固件升级记录表（可选，追踪每台设备的升级历史）
 -- Device firmware upgrade log table (optional, tracks upgrade history for each device)
 CREATE TABLE IF NOT EXISTS device_firmware_upgrade_log (
@@ -147,48 +187,15 @@ CREATE TRIGGER trg_update_fw_upgrade_log_timestamp
   FOR EACH ROW
   EXECUTE FUNCTION update_fw_upgrade_log_timestamp();
 
--- 固件依赖关系表（可选，支持增量更新/A-B测试）
--- Firmware dependencies table (optional, for incremental updates/A-B testing)
-CREATE TABLE IF NOT EXISTS firmware_dependencies (
-  id BIGSERIAL PRIMARY KEY,
-  firmware_id BIGINT NOT NULL REFERENCES firmware_files(id) ON DELETE CASCADE,
-  depends_on_firmware_id BIGINT REFERENCES firmware_files(id) ON DELETE CASCADE,
-  dependency_type TEXT NOT NULL CHECK (dependency_type IN ('requires', 'recommends', 'conflicts')),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (firmware_id, depends_on_firmware_id, dependency_type)
-);
 
-CREATE INDEX IF NOT EXISTS idx_fw_deps_firmware_id 
-  ON firmware_dependencies(firmware_id);
+-- -- -- -- -- -- -- -- -- 还没用到的表结构 -- -- -- -- -- -- -- -- --
+-- -- -- -- -- -- -- -- -- 还没用到的表结构 -- -- -- -- -- -- -- -- --
+-- -- -- -- -- -- -- -- -- 还没用到的表结构 -- -- -- -- -- -- -- -- --
+-- -- -- -- -- -- -- -- -- 还没用到的表结构 -- -- -- -- -- -- -- -- --
+-- -- -- -- -- -- -- -- -- 还没用到的表结构 -- -- -- -- -- -- -- -- --
+-- -- -- -- -- -- -- -- -- 还没用到的表结构 -- -- -- -- -- -- -- -- --
 
-COMMENT ON TABLE firmware_dependencies IS '固件依赖关系表：定义固件之间的依赖/推荐/冲突关系';
-COMMENT ON COLUMN firmware_dependencies.dependency_type IS 'requires(必须)/recommends(推荐)/conflicts(冲突)';
 
--- 固件审计表（可选，记录固件操作历史）
--- Firmware audit table (optional, records firmware operation history)
-CREATE TABLE IF NOT EXISTS firmware_audit (
-  id BIGSERIAL PRIMARY KEY,
-  firmware_id BIGINT,
-  action TEXT NOT NULL, -- 'upload'/'delete'/'update'
-  performed_by TEXT,
-  performed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  details JSONB
-);
-
-COMMENT ON TABLE firmware_audit IS '固件审计表：记录固件操作历史';
-
--- 审计表索引
-CREATE INDEX IF NOT EXISTS idx_firmware_audit_action_performed_by_time
-  ON firmware_audit(action, performed_by, performed_at DESC);
-
-CREATE INDEX IF NOT EXISTS idx_firmware_audit_performed_at
-  ON firmware_audit(performed_at DESC);
-
-CREATE INDEX IF NOT EXISTS idx_firmware_audit_details_device_type
-  ON firmware_audit((details->>'device_type'));
-
-CREATE INDEX IF NOT EXISTS idx_firmware_audit_details_version
-  ON firmware_audit((details->>'version'));
 
 -- 完成日志
 DO $$
