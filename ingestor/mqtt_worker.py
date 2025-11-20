@@ -47,7 +47,9 @@ def on_message(client, userdata, msg):
         topic = msg.topic
         sn = _extract_sn_from_topic(topic)
         if not sn:
+            log(f"[mqtt_worker] invalid topic format: {topic}")
             return
+        log(f"[mqtt_worker] extracted device_sn={sn}")
 
         payload = json.loads(msg.payload.decode("utf-8") or "{}")
         # attach device identifiers for downstream consumers
