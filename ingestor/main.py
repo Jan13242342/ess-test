@@ -7,6 +7,8 @@ from queue import Queue, Empty
 from threading import Event, Thread
 import dateutil.parser
 
+from mqtt_worker import set_queues, setup_mqtt
+
 def log(*args, **kwargs):
     print(time.strftime("[%Y-%m-%d %H:%M:%S]"), *args, flush=True, **kwargs)
 
@@ -33,6 +35,11 @@ QUEUE_MAXSIZE = int(os.getenv("QUEUE_MAXSIZE", "10000"))
 
 stop_event = Event()
 q: Queue[dict] = Queue(maxsize=QUEUE_MAXSIZE)
+history_q: Queue[dict] = Queue(maxsize=QUEUE_MAXSIZE)
+alarm_q: Queue[dict] = Queue(maxsize=QUEUE_MAXSIZE)
+para_q: Queue[dict] = Queue(maxsize=QUEUE_MAXSIZE)
+rpc_ack_q: Queue[dict] = Queue(maxsize=QUEUE_MAXSIZE)
+archive_alarm_q: Queue[dict] = Queue(maxsize=QUEUE_MAXSIZE)
 
 FIELDS = [
     "device_id",
@@ -45,36 +52,6 @@ FIELDS = [
     "q_a", "q_b", "q_c",
     "e_pv_today", "e_load_today", "e_charge_today", "e_discharge_today"
 ]
-
-def parse_device_id(topic: str):
-    parts = topic.split("/")
-    if len(parts) >= 3 and parts[0]=="devices" and parts[2]=="realtime":
-        return parts[1]
-    return None
-
-def parse_history_device_id(topic: str):
-    parts = topic.split("/")
-    if len(parts) >= 3 and parts[0]=="devices" and parts[2]=="history":
-        return parts[1]
-    return None
-
-def parse_alarm_device_id(topic: str):
-    parts = topic.split("/")
-    if len(parts) >= 3 and parts[0]=="devices" and parts[2]=="alarm":
-        return parts[1]
-    return None
-
-def parse_para_device_id(topic: str):
-    parts = topic.split("/")
-    if len(parts) >= 3 and parts[0]=="devices" and parts[2]=="para":
-        return parts[1]
-    return None
-
-def parse_rpc_ack_device_id(topic: str):
-    parts = topic.split("/")
-    if len(parts) >= 3 and parts[0] == "devices" and parts[2] == "rpc_ack":
-        return parts[1]
-    return None
 
 def to_int(v, default=0):
     try:
@@ -135,9 +112,7 @@ ON CONFLICT (device_id) DO UPDATE SET
   e_charge_today=EXCLUDED.e_charge_today, e_discharge_today=EXCLUDED.e_discharge_today;
 """
 
-# 新增历史能量数据的共享订阅和处理
 HISTORY_TOPIC = os.getenv("MQTT_HISTORY_TOPIC", "$share/ess-ingestor/devices/+/history")
-history_q: Queue[dict] = Queue(maxsize=QUEUE_MAXSIZE)
 
 HISTORY_UPSERT_SQL = """
 INSERT INTO history_energy (
@@ -154,7 +129,6 @@ ON CONFLICT (device_id, ts) DO UPDATE SET
 """
 
 def normalize_history(sn: str, payload: dict) -> dict:
-    # 如果 payload 中没有 ts，使用当前时间
     ts = payload.get("ts")
     if not ts:
         ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -168,9 +142,7 @@ def normalize_history(sn: str, payload: dict) -> dict:
         "load_wh_total": int(payload.get("load_wh_total", 0))
     }
 
-# 新增报警topic和队列
 ALARM_TOPIC = os.getenv("MQTT_ALARM_TOPIC", "$share/ess-ingestor/devices/+/alarm")
-alarm_q: Queue[dict] = Queue(maxsize=QUEUE_MAXSIZE)
 
 ALARM_UPSERT_SQL = """
 INSERT INTO alarms (
@@ -191,11 +163,8 @@ DO UPDATE SET
   remark = EXCLUDED.remark;
 """
 
-# 新增 para topic 和队列
 PARA_TOPIC = os.getenv("MQTT_PARA_TOPIC", "$share/ess-ingestor/devices/+/para")
-para_q: Queue[dict] = Queue(maxsize=QUEUE_MAXSIZE)
 
-# 新版参数 upsert SQL
 PARA_UPSERT_SQL = """
 INSERT INTO device_para (device_id, para, updated_at)
 VALUES (%(device_id)s, %(para)s::jsonb, %(updated_at)s)
@@ -204,11 +173,8 @@ ON CONFLICT (device_id) DO UPDATE SET
   updated_at = EXCLUDED.updated_at;
 """
 
-# 新增 RPC 确认 topic 和队列
 RPC_ACK_TOPIC = os.getenv("MQTT_RPC_ACK_TOPIC", "$share/ess-ingestor/devices/+/rpc_ack")
-rpc_ack_q: Queue[dict] = Queue(maxsize=QUEUE_MAXSIZE)
 
-# 修改 RPC 确认更新 SQL - 移除超时检测，只更新 pending 状态
 RPC_ACK_UPDATE_SQL = """
 UPDATE device_rpc_change_log 
 SET status=%(status)s,
@@ -219,95 +185,7 @@ WHERE request_id=%(request_id)s
   AND status = 'pending'
 """
 
-# 仅保留这一份 on_message（请删除上面那段重复定义）
-def on_message(client, userdata, msg):
-    try:
-        if msg.topic.endswith("/realtime"):
-            sn = parse_device_id(msg.topic)
-            if not sn: return
-            payload = json.loads(msg.payload.decode("utf-8"))
-            rec = normalize(sn, payload)
-            q.put(rec, block=False)
-
-        elif msg.topic.endswith("/history"):
-            sn = parse_history_device_id(msg.topic)
-            if not sn: return
-            payload = json.loads(msg.payload.decode("utf-8"))
-            rec = normalize_history(sn, payload)
-            history_q.put(rec, block=False)
-
-        elif msg.topic.endswith("/alarm"):
-            sn = parse_alarm_device_id(msg.topic)
-            if not sn: return
-            payload = json.loads(msg.payload.decode("utf-8"))
-            now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            alarm = {
-                "device_id": int(sn),
-                "alarm_type": payload.get("alarm_type", "unknown"),
-                "code": int(payload.get("code", 0)),
-                "level": payload.get("level", "info"),
-                "extra": json.dumps(payload.get("extra", {})),
-                "status": payload.get("status", "active"),
-                "first_triggered_at": now,
-                "last_triggered_at": now,
-                "repeat_count": 1,
-                "remark": payload.get("remark", None),
-                "confirmed_at": payload.get("confirmed_at") or (now if payload.get("status") == "confirmed" or payload.get("confirmed_by") else None),
-                "confirmed_by": payload.get("confirmed_by", None),
-                "cleared_at": payload.get("cleared_at") or (now if payload.get("status") == "cleared" else None),
-                "cleared_by": payload.get("cleared_by", None),
-            }
-            should_archive = False
-            if alarm["level"] == "critical":
-                if alarm["status"] == "cleared" and alarm["confirmed_at"]:
-                    should_archive = True
-            else:
-                if alarm["status"] == "cleared":
-                    should_archive = True
-            (archive_alarm_q if should_archive else alarm_q).put(alarm, block=False)
-
-        elif msg.topic.endswith("/para"):
-            sn = parse_para_device_id(msg.topic)
-            if not sn: return
-            payload = json.loads(msg.payload.decode("utf-8"))
-            para = {
-                "device_id": int(sn),
-                "para": payload,
-                "updated_at": payload.get("updated_at", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
-            }
-            para_q.put(para, block=False)
-
-        elif msg.topic.endswith("/rpc_ack"):
-            sn = parse_rpc_ack_device_id(msg.topic)
-            if not sn: return
-            payload = json.loads(msg.payload.decode("utf-8"))
-
-            response_id = payload.get("response_id")
-            status = payload.get("status", "error")
-            if not response_id:
-                log(f"[RPC_ACK] missing response_id from device {sn}")
-                return
-            if status not in ["success", "failed", "error", "timeout"]:
-                status = "error"
-
-            msg_text = payload.get("message")
-            if isinstance(msg_text, (dict, list)):
-                msg_text = json.dumps(msg_text, ensure_ascii=False)
-
-            rpc_ack = {
-                "device_sn": sn,
-                "request_id": response_id,
-                "status": status,
-                "message": msg_text,
-            }
-            rpc_ack_q.put(rpc_ack, block=False)
-            log(f"[RPC_ACK] received from device {sn}: {response_id} -> {status}")
-
-    except Exception as e:
-        log("[on_message] error:", e)
-
 def ensure_devices_exist(cur, batch):
-    # 批量 upsert 设备，避免外键约束报错
     device_ids = set(row["device_id"] for row in batch)
     if not device_ids:
         return
@@ -334,7 +212,7 @@ def flusher():
                     if batch:
                         try:
                             with conn.cursor() as cur:
-                                ensure_devices_exist(cur, batch)  # 先批量 upsert 设备
+                                ensure_devices_exist(cur, batch)
                                 execute_batch(cur, UPSERT_SQL, batch, page_size=1000)
                             conn.commit()
                             log(f"[DB] upsert {len(batch)} rows")
@@ -348,7 +226,6 @@ def flusher():
             time.sleep(5)
 
 def ensure_devices_exist_history(cur, batch):
-    # 批量 upsert 设备，避免外键约束报错
     device_ids = set(row["device_id"] for row in batch)
     if not device_ids:
         return
@@ -375,7 +252,7 @@ def history_flusher():
                     if batch:
                         try:
                             with conn.cursor() as cur:
-                                ensure_devices_exist_history(cur, batch)  # 先批量 upsert 设备
+                                ensure_devices_exist_history(cur, batch)
                                 execute_batch(cur, HISTORY_UPSERT_SQL, batch, page_size=1000)
                             conn.commit()
                             log(f"[DB] upsert history {len(batch)} rows")
@@ -434,7 +311,6 @@ def para_flusher():
                     if batch:
                         try:
                             with conn.cursor() as cur:
-                                # 组装参数
                                 upsert_data = [
                                     {
                                         "device_id": rec["device_id"],
@@ -488,9 +364,6 @@ def parse_dt(val):
     if isinstance(val, str):
         return dateutil.parser.parse(val)
     return val
-
-# 新增归档队列
-archive_alarm_q: Queue[dict] = Queue(maxsize=QUEUE_MAXSIZE)
 
 def archive_alarm_worker():
     try:
@@ -548,39 +421,32 @@ def archive_alarm_worker():
         except:
             pass
 
-def on_connect(client, userdata, flags, rc, properties=None):
-    # 兼容 paho v1/v2 回调签名
-    try:
-        code = rc if isinstance(rc, int) else int(getattr(rc, "value", rc))
-    except Exception:
-        code = rc
-    if code == 0:
-        log("[mqtt] connected")
-        # 连接/重连时订阅所有需要的主题
-        client.subscribe(MQTT_TOPIC, MQTT_QOS)         # realtime
-        client.subscribe(HISTORY_TOPIC, MQTT_QOS)      # history
-        client.subscribe(ALARM_TOPIC, MQTT_QOS)        # alarm
-        client.subscribe(PARA_TOPIC, MQTT_QOS)         # para
-        client.subscribe(RPC_ACK_TOPIC, MQTT_QOS)      # rpc_ack
-        log("[mqtt] subscribed:",
-            MQTT_TOPIC, HISTORY_TOPIC, ALARM_TOPIC, PARA_TOPIC, RPC_ACK_TOPIC)
-    else:
-        log(f"[mqtt] connect failed rc={code}")
-
 def main():
     t = Thread(target=flusher, daemon=True); t.start()
     ht = Thread(target=history_flusher, daemon=True); ht.start()
     at = Thread(target=alarm_flusher, daemon=True); at.start()
     pt = Thread(target=para_flusher, daemon=True); pt.start()
     rt = Thread(target=rpc_ack_flusher, daemon=True); rt.start()
-    arch = Thread(target=archive_alarm_worker, daemon=True); arch.start()  # 新增归档线程
+    arch = Thread(target=archive_alarm_worker, daemon=True); arch.start()
+
+    set_queues(q, history_q, alarm_q, para_q, rpc_ack_q, archive_alarm_q, log)
+
     try:
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     except AttributeError:
         client = mqtt.Client()
-    if MQTT_USERNAME: client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
-    client.on_connect = on_connect; client.on_message = on_message
-    client.connect(MQTT_HOST, MQTT_PORT, keepalive=60); client.loop_start()
+    if MQTT_USERNAME:
+        client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
+    topics = [
+        (MQTT_TOPIC, MQTT_QOS),
+        (HISTORY_TOPIC, MQTT_QOS),
+        (ALARM_TOPIC, MQTT_QOS),
+        (PARA_TOPIC, MQTT_QOS),
+        (RPC_ACK_TOPIC, MQTT_QOS),
+    ]
+    setup_mqtt(client, topics, log)
+    client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
+    client.loop_start()
 
     def shutdown(sig, frm):
         log("shutting down..."); stop_event.set(); client.loop_stop(); client.disconnect()
