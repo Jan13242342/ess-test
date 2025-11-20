@@ -7,9 +7,14 @@ from threading import Event
 import dateutil.parser
 
 def log(*args, **kwargs):
+    """打印带时间戳的日志信息"""
     print(time.strftime("[%Y-%m-%d %H:%M:%S]"), *args, flush=True, **kwargs)
 
 def ensure_devices_exist(cur, batch):
+    """
+    确保批量数据中的 device_id 在 devices 表中存在，不存在则插入。
+    避免外键约束或 upsert 时因设备不存在而失败。
+    """
     device_ids = set(row["device_id"] for row in batch)
     if not device_ids:
         return
@@ -20,6 +25,10 @@ def ensure_devices_exist(cur, batch):
     )
 
 def flusher(stop_event, q, PG_DSN, UPSERT_SQL, BATCH_SIZE, FLUSH_MS):
+    """
+    通用批量写入线程。
+    从队列 q 批量取数据，按 UPSERT_SQL 写入数据库。
+    """
     while not stop_event.is_set():
         try:
             conn = psycopg2.connect(PG_DSN)
@@ -28,6 +37,7 @@ def flusher(stop_event, q, PG_DSN, UPSERT_SQL, BATCH_SIZE, FLUSH_MS):
                 while not stop_event.is_set():
                     batch = []
                     deadline = time.time() + FLUSH_MS/1000.0
+                    # 批量取数据，直到达到 batch_size 或超时
                     while len(batch) < BATCH_SIZE and time.time() < deadline:
                         try:
                             batch.append(q.get(timeout=0.05))
@@ -50,6 +60,9 @@ def flusher(stop_event, q, PG_DSN, UPSERT_SQL, BATCH_SIZE, FLUSH_MS):
             time.sleep(5)
 
 def history_flusher(stop_event, history_q, PG_DSN, HISTORY_UPSERT_SQL, BATCH_SIZE, FLUSH_MS):
+    """
+    专门处理历史数据的批量写入线程。
+    """
     while not stop_event.is_set():
         try:
             conn = psycopg2.connect(PG_DSN)
@@ -80,6 +93,9 @@ def history_flusher(stop_event, history_q, PG_DSN, HISTORY_UPSERT_SQL, BATCH_SIZ
             time.sleep(5)
 
 def alarm_flusher(stop_event, alarm_q, PG_DSN, ALARM_UPSERT_SQL, BATCH_SIZE, FLUSH_MS):
+    """
+    专门处理报警数据的批量写入线程。
+    """
     while not stop_event.is_set():
         try:
             conn = psycopg2.connect(PG_DSN)
@@ -109,6 +125,9 @@ def alarm_flusher(stop_event, alarm_q, PG_DSN, ALARM_UPSERT_SQL, BATCH_SIZE, FLU
             time.sleep(5)
 
 def para_flusher(stop_event, para_q, PG_DSN, PARA_UPSERT_SQL, BATCH_SIZE, FLUSH_MS):
+    """
+    专门处理参数数据的批量写入线程。
+    """
     while not stop_event.is_set():
         try:
             conn = psycopg2.connect(PG_DSN)
@@ -125,6 +144,7 @@ def para_flusher(stop_event, para_q, PG_DSN, PARA_UPSERT_SQL, BATCH_SIZE, FLUSH_
                     if batch:
                         try:
                             with conn.cursor() as cur:
+                                # 参数需要转为json字符串
                                 upsert_data = [
                                     {
                                         "device_id": rec["device_id"],
@@ -146,6 +166,9 @@ def para_flusher(stop_event, para_q, PG_DSN, PARA_UPSERT_SQL, BATCH_SIZE, FLUSH_
             time.sleep(5)
 
 def rpc_ack_flusher(stop_event, rpc_ack_q, PG_DSN, RPC_ACK_UPDATE_SQL, BATCH_SIZE, FLUSH_MS):
+    """
+    专门处理RPC应答的批量更新线程。
+    """
     while not stop_event.is_set():
         try:
             conn = psycopg2.connect(PG_DSN)
@@ -175,11 +198,17 @@ def rpc_ack_flusher(stop_event, rpc_ack_q, PG_DSN, RPC_ACK_UPDATE_SQL, BATCH_SIZ
             time.sleep(5)
 
 def parse_dt(val):
+    """
+    字符串转为datetime对象，已是datetime则直接返回。
+    """
     if isinstance(val, str):
         return dateutil.parser.parse(val)
     return val
 
 def archive_alarm_worker(stop_event, archive_alarm_q, PG_DSN):
+    """
+    报警归档线程：将已清除的报警从 alarms 表转移到 alarm_history 表，并记录归档时间和持续时长。
+    """
     try:
         conn = psycopg2.connect(PG_DSN)
         conn.autocommit = False
@@ -190,6 +219,7 @@ def archive_alarm_worker(stop_event, archive_alarm_q, PG_DSN):
                 except Empty:
                     continue
                 try:
+                    # 查找未清除的报警
                     cur.execute(
                         "SELECT * FROM alarms WHERE device_id=%s AND alarm_type=%s AND code=%s AND status!='cleared' ORDER BY last_triggered_at DESC LIMIT 1",
                         (alarm["device_id"], alarm["alarm_type"], alarm["code"])
@@ -199,6 +229,7 @@ def archive_alarm_worker(stop_event, archive_alarm_q, PG_DSN):
                         cleared_at = parse_dt(alarm["cleared_at"])
                         first_triggered_at = parse_dt(row["first_triggered_at"])
                         duration = (cleared_at - first_triggered_at) if cleared_at and first_triggered_at else None
+                        # 插入历史表
                         cur.execute(
                             """
                             INSERT INTO alarm_history (
@@ -220,6 +251,7 @@ def archive_alarm_worker(stop_event, archive_alarm_q, PG_DSN):
                                 duration
                             )
                         )
+                        # 删除原报警
                         cur.execute(
                             "DELETE FROM alarms WHERE id=%s", (row["id"],)
                         )

@@ -5,11 +5,13 @@ import paho.mqtt.client as mqtt
 from db_flushers import (
     flusher, history_flusher, alarm_flusher, para_flusher, rpc_ack_flusher, archive_alarm_worker
 )
-from dotenv import load_dotenv, find_dotenv   # ← 加上这一行
+from dotenv import load_dotenv, find_dotenv
 from utils import log, parse_device_id, to_int, normalize, normalize_history
 
+# 加载 .env 文件中的环境变量（如果存在）
 load_dotenv(find_dotenv(".env"), override=True)
 
+# 读取MQTT和数据库相关配置
 MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 MQTT_USERNAME = os.getenv("MQTT_USERNAME") or None
@@ -29,15 +31,16 @@ BATCH_SIZE = int(os.getenv("BATCH_SIZE", "200"))
 FLUSH_MS = int(os.getenv("BATCH_FLUSH_MS", "1000"))
 QUEUE_MAXSIZE = int(os.getenv("QUEUE_MAXSIZE", "10000"))
 
-# 队列定义
+# 定义各类数据的队列和事件
 stop_event = Event()
-q = Queue(maxsize=QUEUE_MAXSIZE)
-history_q = Queue(maxsize=QUEUE_MAXSIZE)
-alarm_q = Queue(maxsize=QUEUE_MAXSIZE)
-para_q = Queue(maxsize=QUEUE_MAXSIZE)
-rpc_ack_q = Queue(maxsize=QUEUE_MAXSIZE)
-archive_alarm_q = Queue(maxsize=QUEUE_MAXSIZE)
+q = Queue(maxsize=QUEUE_MAXSIZE)              # 实时数据队列
+history_q = Queue(maxsize=QUEUE_MAXSIZE)      # 历史能量数据队列
+alarm_q = Queue(maxsize=QUEUE_MAXSIZE)        # 报警数据队列
+para_q = Queue(maxsize=QUEUE_MAXSIZE)         # 参数数据队列
+rpc_ack_q = Queue(maxsize=QUEUE_MAXSIZE)      # RPC应答队列
+archive_alarm_q = Queue(maxsize=QUEUE_MAXSIZE)# 报警归档队列
 
+# 实时数据字段定义
 FIELDS = [
     "device_id",
     "soc", "soh",
@@ -50,6 +53,7 @@ FIELDS = [
     "e_pv_today", "e_load_today", "e_charge_today", "e_discharge_today"
 ]
 
+# 实时数据 UPSERT SQL
 UPSERT_SQL = """
 INSERT INTO ess_realtime_data (
   device_id, updated_at,
@@ -85,7 +89,7 @@ ON CONFLICT (device_id) DO UPDATE SET
   e_charge_today=EXCLUDED.e_charge_today, e_discharge_today=EXCLUDED.e_discharge_today;
 """
 
-# 新增历史能量数据的共享订阅和处理
+# 历史能量数据相关配置
 HISTORY_TOPIC = os.getenv("MQTT_HISTORY_TOPIC", "$share/ess-ingestor/devices/+/history")
 history_q: Queue[dict] = Queue(maxsize=QUEUE_MAXSIZE)
 
@@ -104,7 +108,9 @@ ON CONFLICT (device_id, ts) DO UPDATE SET
 """
 
 def normalize_history(sn: str, payload: dict) -> dict:
-    # 如果 payload 中没有 ts，使用当前时间
+    """
+    归一化历史能量数据，确保字段齐全。
+    """
     ts = payload.get("ts")
     if not ts:
         ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -118,7 +124,7 @@ def normalize_history(sn: str, payload: dict) -> dict:
         "load_wh_total": int(payload.get("load_wh_total", 0))
     }
 
-# 新增报警topic和队列
+# 报警数据相关配置
 ALARM_TOPIC = os.getenv("MQTT_ALARM_TOPIC", "$share/ess-ingestor/devices/+/alarm")
 alarm_q: Queue[dict] = Queue(maxsize=QUEUE_MAXSIZE)
 
@@ -141,11 +147,10 @@ DO UPDATE SET
   remark = EXCLUDED.remark;
 """
 
-# 新增 para topic 和队列
+# 参数数据相关配置
 PARA_TOPIC = os.getenv("MQTT_PARA_TOPIC", "$share/ess-ingestor/devices/+/para")
 para_q: Queue[dict] = Queue(maxsize=QUEUE_MAXSIZE)
 
-# 新版参数 upsert SQL
 PARA_UPSERT_SQL = """
 INSERT INTO device_para (device_id, para, updated_at)
 VALUES (%(device_id)s, %(para)s::jsonb, %(updated_at)s)
@@ -154,11 +159,10 @@ ON CONFLICT (device_id) DO UPDATE SET
   updated_at = EXCLUDED.updated_at;
 """
 
-# 新增 RPC 确认 topic 和队列
+# RPC应答相关配置
 RPC_ACK_TOPIC = os.getenv("MQTT_RPC_ACK_TOPIC", "$share/ess-ingestor/devices/+/rpc_ack")
 rpc_ack_q: Queue[dict] = Queue(maxsize=QUEUE_MAXSIZE)
 
-# 修改 RPC 确认更新 SQL - 移除超时检测，只更新 pending 状态
 RPC_ACK_UPDATE_SQL = """
 UPDATE device_rpc_change_log 
 SET status=%(status)s,
@@ -169,8 +173,10 @@ WHERE request_id=%(request_id)s
   AND status = 'pending'
 """
 
-# 仅保留这一份 on_message（请删除上面那段重复定义）
 def on_message(client, userdata, msg):
+    """
+    MQTT消息回调，根据不同topic类型解析数据并放入对应队列。
+    """
     try:
         if msg.topic.endswith("/realtime"):
             sn = parse_device_id(msg.topic, "realtime")
@@ -257,10 +263,13 @@ def on_message(client, userdata, msg):
         log("[on_message] error:", e)
 
 def ensure_devices_exist(cur, batch):
-    # 批量 upsert 设备，避免外键约束报错
+    """
+    批量 upsert 设备，避免外键约束报错
+    """
     device_ids = set(row["device_id"] for row in batch)
     if not device_ids:
         return
+    from psycopg2.extras import execute_batch
     execute_batch(
         cur,
         "INSERT INTO devices (id, device_sn, created_at) VALUES (%s, %s, now()) ON CONFLICT (id) DO NOTHING;",
@@ -268,6 +277,9 @@ def ensure_devices_exist(cur, batch):
     )
 
 def on_connect(client, userdata, flags, rc, properties=None):
+    """
+    MQTT连接回调，连接成功后订阅所有相关主题。
+    """
     try:
         code = rc if isinstance(rc, int) else int(getattr(rc, "value", rc))
     except Exception:
@@ -290,6 +302,10 @@ def on_connect(client, userdata, flags, rc, properties=None):
         log(f"[mqtt] connect failed rc={code}")
 
 def main():
+    """
+    主入口：启动各类数据库写入线程，初始化MQTT客户端并进入主循环。
+    """
+    # 启动各类数据写入线程
     t = Thread(target=flusher, args=(stop_event, q, PG_DSN, UPSERT_SQL, BATCH_SIZE, FLUSH_MS), daemon=True)
     ht = Thread(target=history_flusher, args=(stop_event, history_q, PG_DSN, HISTORY_UPSERT_SQL, BATCH_SIZE, FLUSH_MS), daemon=True)
     at = Thread(target=alarm_flusher, args=(stop_event, alarm_q, PG_DSN, ALARM_UPSERT_SQL, BATCH_SIZE, FLUSH_MS), daemon=True)
@@ -298,6 +314,7 @@ def main():
     arch = Thread(target=archive_alarm_worker, args=(stop_event, archive_alarm_q, PG_DSN), daemon=True)
     t.start(); ht.start(); at.start(); pt.start(); rt.start(); arch.start()
 
+    # 初始化并启动MQTT客户端
     try:
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     except AttributeError:
@@ -306,10 +323,12 @@ def main():
     client.on_connect = on_connect; client.on_message = on_message
     client.connect(MQTT_HOST, MQTT_PORT, keepalive=60); client.loop_start()
 
+    # 信号处理，优雅关闭
     def shutdown(sig, frm):
         log("shutting down..."); stop_event.set(); client.loop_stop(); client.disconnect()
     signal.signal(signal.SIGINT, shutdown); signal.signal(signal.SIGTERM, shutdown)
 
+    # 主循环，监控线程存活
     try:
         while not stop_event.is_set():
             if not t.is_alive() or not ht.is_alive() or not at.is_alive() or not pt.is_alive() or not rt.is_alive():
