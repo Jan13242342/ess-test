@@ -14,6 +14,7 @@ router = APIRouter(prefix="/api/v1/alarms", tags=["报警管理 | Alarm Manageme
 class AlarmItem(BaseModel):
     alarm_id: int = Field(..., alias="alarm_id")
     device_id: Optional[int]
+    device_sn: Optional[str] = None  # 新增设备SN字段
     alarm_type: str
     code: int
     level: str
@@ -106,6 +107,7 @@ async def list_all_alarms(
         for row in rows:
             d = dict(row)
             d["alarm_id"] = d.pop("id")
+            # device_sn 字段已包含在 row 里，无需额外处理
             items.append(d)
     return {"items": items, "page": page, "page_size": page_size, "total": total}
 
