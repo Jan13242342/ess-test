@@ -65,7 +65,7 @@ def gen_alarm_payload(device_id: int, status: str) -> dict:
     codes = list(code_level_map.keys())
     code = random.choice(codes)
     level = code_level_map[code]
-    return {
+    payload = {
         "alarm_type": random.choice(alarm_types),
         "code": code,
         "level": level,
@@ -73,6 +73,10 @@ def gen_alarm_payload(device_id: int, status: str) -> dict:
         "status": status,
         "remark": f"测试报警 device {device_id}"
     }
+    if status == "cleared":
+        payload["cleared_by"] = "device"
+        payload["cleared_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    return payload
 
 def gen_para_payload(device_id: int) -> dict:
     # 所有参数都放在 para 字段，方便后端直接存 JSON
@@ -88,7 +92,7 @@ def gen_para_payload(device_id: int) -> dict:
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     }
 
-def device_worker(device_id, interval=2, history_interval=300, alarm_interval=90, para_interval=90):
+def device_worker(device_id, interval=2, history_interval=300, alarm_interval=20, para_interval=90):
     last_alarm_status = "cleared"  # 初始为cleared，下次先发active
     last_alarm_payload = None
     while True:
@@ -138,6 +142,7 @@ def device_worker(device_id, interval=2, history_interval=300, alarm_interval=90
                         alarm_payload_cleared = last_alarm_payload.copy()
                         alarm_payload_cleared["status"] = "cleared"
                         alarm_payload_cleared["cleared_by"] = "device"
+                        alarm_payload_cleared["cleared_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                         alarm_result_cleared = client.publish(alarm_topic, json.dumps(alarm_payload_cleared), qos=MQTT_QOS)
                         if alarm_result_cleared.rc != 0:
                             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] device_id={device_id} alarm(cleared) publish失败: {alarm_result_cleared.rc}")

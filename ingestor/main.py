@@ -132,11 +132,13 @@ ALARM_UPSERT_SQL = """
 INSERT INTO alarms (
   device_id, alarm_type, code, level, extra, status,
   first_triggered_at, last_triggered_at, repeat_count, remark,
-  confirmed_at, confirmed_by, cleared_at, cleared_by
+  cleared_at, cleared_by,
+  ack, ack_by, ack_time
 ) VALUES (
   %(device_id)s, %(alarm_type)s, %(code)s, %(level)s, %(extra)s, %(status)s,
   %(first_triggered_at)s, %(last_triggered_at)s, %(repeat_count)s, %(remark)s,
-  %(confirmed_at)s, %(confirmed_by)s, %(cleared_at)s, %(cleared_by)s
+  %(cleared_at)s, %(cleared_by)s,
+  %(ack)s, %(ack_by)s, %(ack_time)s
 )
 ON CONFLICT (device_id, alarm_type, code)
 DO UPDATE SET
@@ -144,7 +146,12 @@ DO UPDATE SET
   repeat_count = alarms.repeat_count + 1,
   level = EXCLUDED.level,
   extra = EXCLUDED.extra,
-  remark = EXCLUDED.remark;
+  remark = EXCLUDED.remark,
+  cleared_at = EXCLUDED.cleared_at,
+  cleared_by = EXCLUDED.cleared_by,
+  ack = EXCLUDED.ack,
+  ack_by = EXCLUDED.ack_by,
+  ack_time = EXCLUDED.ack_time;
 """
 
 # 参数数据相关配置
@@ -208,18 +215,13 @@ def on_message(client, userdata, msg):
                 "last_triggered_at": now,
                 "repeat_count": 1,
                 "remark": payload.get("remark", None),
-                "confirmed_at": payload.get("confirmed_at") or (now if payload.get("status") == "confirmed" or payload.get("confirmed_by") else None),
-                "confirmed_by": payload.get("confirmed_by", None),
                 "cleared_at": payload.get("cleared_at") or (now if payload.get("status") == "cleared" else None),
                 "cleared_by": payload.get("cleared_by", None),
+                "ack": payload.get("ack", False),
+                "ack_by": payload.get("ack_by", None),
+                "ack_time": payload.get("ack_time", None),
             }
-            should_archive = False
-            if alarm["level"] == "critical":
-                if alarm["status"] == "cleared" and alarm["confirmed_at"]:
-                    should_archive = True
-            else:
-                if alarm["status"] == "cleared":
-                    should_archive = True
+            should_archive = alarm["status"] == "cleared"
             (archive_alarm_q if should_archive else alarm_q).put(alarm, block=False)
 
         elif msg.topic.endswith("/para"):

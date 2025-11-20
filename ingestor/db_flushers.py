@@ -229,17 +229,21 @@ def archive_alarm_worker(stop_event, archive_alarm_q, PG_DSN):
                         cleared_at = parse_dt(alarm["cleared_at"])
                         first_triggered_at = parse_dt(row["first_triggered_at"])
                         duration = (cleared_at - first_triggered_at) if cleared_at and first_triggered_at else None
-                        # 插入历史表
+                        # 插入历史表（新增ack相关字段）
                         cur.execute(
                             """
                             INSERT INTO alarm_history (
                                 device_id, alarm_type, code, level, extra, status,
                                 first_triggered_at, last_triggered_at, repeat_count, remark,
-                                confirmed_at, confirmed_by, cleared_at, cleared_by, archived_at, duration
+                                cleared_at, cleared_by,
+                                ack, ack_by, ack_time,
+                                archived_at, duration
                             ) VALUES (
                                 %s, %s, %s, %s, %s, %s,
                                 %s, %s, %s, %s,
-                                %s, %s, %s, %s, now(), %s
+                                %s, %s,
+                                %s, %s, %s,
+                                now(), %s
                             )
                             """,
                             (
@@ -247,7 +251,8 @@ def archive_alarm_worker(stop_event, archive_alarm_q, PG_DSN):
                                 json.dumps(row["extra"]) if isinstance(row["extra"], dict) else row["extra"],
                                 "cleared",
                                 row["first_triggered_at"], row["last_triggered_at"], row["repeat_count"], row["remark"],
-                                row["confirmed_at"], row["confirmed_by"], alarm["cleared_at"], alarm["cleared_by"],
+                                alarm["cleared_at"], alarm["cleared_by"],
+                                row.get("ack", False), row.get("ack_by"), row.get("ack_time"),
                                 duration
                             )
                         )
