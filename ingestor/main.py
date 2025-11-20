@@ -323,6 +323,28 @@ def ensure_devices_exist(cur, batch):
         [(did, f"SN{did:04d}") for did in device_ids]
     )
 
+def on_connect(client, userdata, flags, rc, properties=None):
+    try:
+        code = rc if isinstance(rc, int) else int(getattr(rc, "value", rc))
+    except Exception:
+        code = rc
+    if code == 0:
+        log("[mqtt] connected")
+        client.subscribe(MQTT_TOPIC, MQTT_QOS)
+        client.subscribe(HISTORY_TOPIC, MQTT_QOS)
+        client.subscribe(ALARM_TOPIC, MQTT_QOS)
+        client.subscribe(PARA_TOPIC, MQTT_QOS)
+        client.subscribe(RPC_ACK_TOPIC, MQTT_QOS)
+        log("[mqtt] subscribed:",
+            MQTT_TOPIC,
+            HISTORY_TOPIC,
+            ALARM_TOPIC,
+            PARA_TOPIC,
+            RPC_ACK_TOPIC,
+        )
+    else:
+        log(f"[mqtt] connect failed rc={code}")
+
 def main():
     t = Thread(target=flusher, args=(stop_event, q, PG_DSN, UPSERT_SQL, BATCH_SIZE, FLUSH_MS), daemon=True)
     ht = Thread(target=history_flusher, args=(stop_event, history_q, PG_DSN, HISTORY_UPSERT_SQL, BATCH_SIZE, FLUSH_MS), daemon=True)
