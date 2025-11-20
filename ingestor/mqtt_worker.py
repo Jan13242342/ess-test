@@ -42,6 +42,7 @@ def _extract_sn_from_topic(topic: str):
     return None
 
 def on_message(client, userdata, msg):
+    log(f"[mqtt_worker] on_message topic={msg.topic} payload={msg.payload}")
     try:
         topic = msg.topic
         sn = _extract_sn_from_topic(topic)
