@@ -5,6 +5,7 @@ import paho.mqtt.client as mqtt
 from db_flushers import (
     flusher, history_flusher, alarm_flusher, para_flusher, rpc_ack_flusher, archive_alarm_worker
 )
+from dotenv import load_dotenv, find_dotenv   # ← 加上这一行
 
 def log(*args, **kwargs):
     print(time.strftime("[%Y-%m-%d %H:%M:%S]"), *args, flush=True, **kwargs)
