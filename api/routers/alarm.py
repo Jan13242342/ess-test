@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/v1/alarms", tags=["报警管理 | Alarm Manageme
 class AlarmItem(BaseModel):
     alarm_id: int = Field(..., alias="alarm_id")
     device_id: Optional[int]
-    device_sn: Optional[str] = None  # 新增设备SN字段
+    device_sn: Optional[str] = None
     alarm_type: str
     code: int
     level: str
@@ -24,10 +24,11 @@ class AlarmItem(BaseModel):
     last_triggered_at: datetime
     repeat_count: int
     remark: Optional[str]
-    confirmed_at: Optional[datetime]
-    confirmed_by: Optional[str]
     cleared_at: Optional[datetime]
     cleared_by: Optional[str]
+    ack: Optional[bool] = None
+    ack_by: Optional[str] = None
+    ack_time: Optional[datetime] = None
 
     class Config:
         allow_population_by_field_name = True
